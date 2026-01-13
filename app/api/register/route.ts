@@ -39,6 +39,7 @@ export async function POST(req: Request) {
       surname,
       phone,
       email,
+      type: 'user', // Default type is user
       descriptor, // ข้อมูลใบหน้า (Array ของตัวเลข)
       timestamp: new Date().toISOString()
     };

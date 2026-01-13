@@ -89,10 +89,7 @@ export default function CheckIn() {
         
         // ค้นหาข้อมูลผู้ใช้เต็มรูปแบบ
         const user = usersRef.current.find(u => u.name === name && u.surname === surname);
-        if (user) {
-          localStorage.setItem('currentUser', JSON.stringify(user));
-        }
-
+        
         // ส่ง API บันทึก Log
         const response = await fetch('/api/log', {
             method: 'POST',
@@ -106,12 +103,18 @@ export default function CheckIn() {
             setStatus(`คุณ ${name} บันทึกไปแล้วเมื่อครู่ (Cooldown 30 นาที)`);
         } else {
             setLastCheckIn(fullName);
-            setStatus('ยืนยันตัวตนสำเร็จ! กำลังเข้าสู่หน้าหลัก...');
-            
-            // Redirect ไปหน้า Home หลังจากบันทึก Log
-            setTimeout(() => {
-              router.push('/home');
-            }, 1500);
+
+            // ถ้าเป็น Admin ให้ Login และ Redirect
+            if (user && user.type === 'admin') {
+              localStorage.setItem('currentUser', JSON.stringify(user));
+              setStatus('ยืนยันตัวตนสำเร็จ (Admin)! กำลังเข้าสู่หน้าหลัก...');
+              setTimeout(() => {
+                router.push('/home');
+              }, 1500);
+            } else {
+              // ถ้าไม่ใช่ Admin ให้แค่บันทึก Check-in
+              setStatus('บันทึกเวลาสำเร็จ!');
+            }
         }
         
         lastLoggedNameRef.current = fullName;

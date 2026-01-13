@@ -10,8 +10,15 @@ export default function HomePage() {
     const storedUser = localStorage.getItem('currentUser');
     if (!storedUser) {
       router.push('/checkin');
+      return;
+    }
+    
+    const parsedUser = JSON.parse(storedUser);
+    if (parsedUser.type !== 'admin') {
+      localStorage.removeItem('currentUser');
+      router.push('/checkin');
     } else {
-      setUser(JSON.parse(storedUser));
+      setUser(parsedUser);
     }
   }, [router]);
 
