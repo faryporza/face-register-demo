@@ -147,10 +147,12 @@ export default function CheckIn() {
 
       const resizedDetections = faceapi.resizeResults(detections, displaySize);
       
+      if (!canvasRef.current) return;
       const context = canvasRef.current.getContext('2d');
       context?.clearRect(0, 0, displaySize.width, displaySize.height);
 
       resizedDetections.forEach(result => {
+        if (!canvasRef.current) return;
         const { descriptor } = result;
         const bestMatch = faceMatcherRef.current!.findBestMatch(descriptor);
         
@@ -160,7 +162,7 @@ export default function CheckIn() {
             label: bestMatch.toString(),
             boxColor: bestMatch.label === 'unknown' ? 'red' : 'green'
         });
-        drawBox.draw(canvasRef.current!);
+        drawBox.draw(canvasRef.current);
 
         // ถ้าเจอคนที่รู้จัก และไม่อยู่ในช่วง Cooldown -> บันทึก Log
         if (bestMatch.label !== 'unknown' && !isProcessingRef.current) {
