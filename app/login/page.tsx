@@ -20,7 +20,15 @@ export default function LoginPage() {
   const faceMatcherRef = useRef<faceapi.FaceMatcher | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const matchCountRef = useRef(0);
+  const stableCountRef = useRef(0);
   const lastMatchLabelRef = useRef<string | null>(null);
+  const matchedUserRef = useRef<any>(null);
+
+  const STABLE_REQUIRED = 6; // ~1.2s
+  const DETECTOR_INPUT_SIZE = 192; // มือถือ 160-192
+  const DETECTOR_SCORE_THRESHOLD = 0.6;
+  const ZONE_W = 220;
+  const ZONE_H = 300;
 
   useEffect(() => {
     const loadModels = async () => {
@@ -96,12 +104,14 @@ export default function LoginPage() {
       }
 
       const user = result.user;
+      matchedUserRef.current = user;
       setMatchedUser(user);
       const descriptor = new Float32Array(user.descriptor);
       const labeledDescriptor = new faceapi.LabeledFaceDescriptors(user.email, [descriptor]);
       // Threshold กลาง ๆ เพื่อให้แมสยังพอได้ แต่ลด false positive
       faceMatcherRef.current = new faceapi.FaceMatcher([labeledDescriptor], 0.55);
       matchCountRef.current = 0;
+      stableCountRef.current = 0;
       lastMatchLabelRef.current = null;
 
       setStep(2);
@@ -121,13 +131,27 @@ export default function LoginPage() {
     const displaySize = { width: video.videoWidth, height: video.videoHeight };
     faceapi.matchDimensions(canvas, displaySize);
 
+    const zoneX = (displaySize.width - ZONE_W) / 2;
+    const zoneY = (displaySize.height - ZONE_H) / 2;
+
+    const isInZone = (box: faceapi.Box) => {
+      const cx = box.x + box.width / 2;
+      const cy = box.y + box.height / 2;
+      return cx > zoneX && cx < zoneX + ZONE_W && cy > zoneY && cy < zoneY + ZONE_H;
+    };
+
     stopDetection();
 
     intervalRef.current = setInterval(async () => {
       if (video.paused || video.ended || video.readyState !== 4) return;
 
+      const options = new faceapi.TinyFaceDetectorOptions({
+        inputSize: DETECTOR_INPUT_SIZE,
+        scoreThreshold: DETECTOR_SCORE_THRESHOLD,
+      });
+
       const detection = await faceapi
-        .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
+        .detectSingleFace(video, options)
         .withFaceLandmarks(true)
         .withFaceDescriptor();
 
@@ -135,6 +159,8 @@ export default function LoginPage() {
       if (context) context.clearRect(0, 0, canvas.width, canvas.height);
 
       if (!detection) {
+        stableCountRef.current = 0;
+        matchCountRef.current = 0;
         setStatus('❌ ไม่พบใบหน้า (ขยับเข้ามาในกรอบ)');
         return;
       }
@@ -143,35 +169,41 @@ export default function LoginPage() {
       const box = detection.detection.box;
       const isCloseEnough = box.width >= MIN_FACE_WIDTH;
       if (!isCloseEnough) {
+        stableCountRef.current = 0;
+        matchCountRef.current = 0;
         setStatus('🟠 กรุณาขยับหน้าเข้ามาใกล้กล้อง');
         return;
       }
 
+      // --- ตรวจ Zone ---
+      if (!isInZone(box)) {
+        stableCountRef.current = 0;
+        matchCountRef.current = 0;
+        setStatus('🟥 กรุณาอยู่ในกรอบกลาง');
+        return;
+      }
+
       const resized = faceapi.resizeResults(detection, displaySize);
-      faceapi.draw.drawDetections(canvas, resized);
+      faceapi.draw.drawFaceLandmarks(canvas, resized);
 
       const matcher = faceMatcherRef.current;
       if (!matcher) return;
       const bestMatch = matcher.findBestMatch(detection.descriptor);
       if (bestMatch.label !== 'unknown') {
-        if (lastMatchLabelRef.current === bestMatch.label) {
-          matchCountRef.current += 1;
-        } else {
-          lastMatchLabelRef.current = bestMatch.label;
-          matchCountRef.current = 1;
-        }
+        stableCountRef.current += 1;
 
-        if (matchCountRef.current < 3) {
-          setStatus('⏳ กำลังยืนยันใบหน้า...');
+        if (stableCountRef.current < STABLE_REQUIRED) {
+          setStatus(`⏳ กำลังยืนยัน... (${stableCountRef.current}/${STABLE_REQUIRED})`);
           return;
         }
 
         setStatus('✅ ยืนยันตัวตนสำเร็จ');
         stopDetection();
         stopVideo();
-        localStorage.setItem('currentUser', JSON.stringify(matchedUser));
+        localStorage.setItem('currentUser', JSON.stringify(matchedUserRef.current));
         setTimeout(() => router.push('/home'), 500);
       } else {
+        stableCountRef.current = 0;
         matchCountRef.current = 0;
         lastMatchLabelRef.current = null;
         setStatus('❌ ใบหน้าไม่ตรงกับบัญชีนี้');
@@ -226,7 +258,7 @@ export default function LoginPage() {
 
         {step === 2 && (
           <div className="flex flex-col items-center gap-4">
-            <div className="relative w-full aspect-[4/3] bg-black rounded-xl overflow-hidden shadow-inner">
+            <div className="relative w-full aspect-[4/3] bg-black rounded-xl overflow-hidden shadow-inner group">
               <video
                 ref={videoRef}
                 autoPlay
@@ -239,6 +271,13 @@ export default function LoginPage() {
                 ref={canvasRef}
                 className="absolute top-0 left-0 w-full h-full scale-x-[-1]"
               />
+
+              {/* Face Frame (กรอบหน้า) */}
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <div className={`w-[220px] h-[300px] border-4 rounded-[50%] transition-colors duration-300 shadow-[0_0_100px_rgba(0,0,0,0.5)_inset]
+                      ${status.includes('✅') ? 'border-green-400 shadow-[0_0_20px_rgba(74,222,128,0.5)]' : 'border-blue-400/70 border-dashed'}
+                  `}></div>
+              </div>
 
               <div className="absolute bottom-4 left-0 right-0 text-center px-4">
                 <span className="bg-black/60 text-white px-4 py-2 rounded-full text-sm font-medium backdrop-blur-sm">
