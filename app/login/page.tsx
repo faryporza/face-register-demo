@@ -19,6 +19,8 @@ export default function LoginPage() {
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const faceMatcherRef = useRef<faceapi.FaceMatcher | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const matchCountRef = useRef(0);
+  const lastMatchLabelRef = useRef<string | null>(null);
 
   useEffect(() => {
     const loadModels = async () => {
@@ -97,8 +99,10 @@ export default function LoginPage() {
       setMatchedUser(user);
       const descriptor = new Float32Array(user.descriptor);
       const labeledDescriptor = new faceapi.LabeledFaceDescriptors(user.email, [descriptor]);
-      // Threshold สูงขึ้นเพื่อรองรับการใส่แมส (ยอมให้คลาดเคลื่อนมากขึ้น)
-      faceMatcherRef.current = new faceapi.FaceMatcher([labeledDescriptor], 0.7);
+      // Threshold กลาง ๆ เพื่อให้แมสยังพอได้ แต่ลด false positive
+      faceMatcherRef.current = new faceapi.FaceMatcher([labeledDescriptor], 0.55);
+      matchCountRef.current = 0;
+      lastMatchLabelRef.current = null;
 
       setStep(2);
       setStatus('กรุณามองกล้องเพื่อยืนยันใบหน้า');
@@ -150,12 +154,26 @@ export default function LoginPage() {
       if (!matcher) return;
       const bestMatch = matcher.findBestMatch(detection.descriptor);
       if (bestMatch.label !== 'unknown') {
+        if (lastMatchLabelRef.current === bestMatch.label) {
+          matchCountRef.current += 1;
+        } else {
+          lastMatchLabelRef.current = bestMatch.label;
+          matchCountRef.current = 1;
+        }
+
+        if (matchCountRef.current < 3) {
+          setStatus('⏳ กำลังยืนยันใบหน้า...');
+          return;
+        }
+
         setStatus('✅ ยืนยันตัวตนสำเร็จ');
         stopDetection();
         stopVideo();
         localStorage.setItem('currentUser', JSON.stringify(matchedUser));
         setTimeout(() => router.push('/home'), 500);
       } else {
+        matchCountRef.current = 0;
+        lastMatchLabelRef.current = null;
         setStatus('❌ ใบหน้าไม่ตรงกับบัญชีนี้');
       }
     }, 200);
