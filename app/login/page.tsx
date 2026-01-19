@@ -146,7 +146,9 @@ export default function LoginPage() {
       const resized = faceapi.resizeResults(detection, displaySize);
       faceapi.draw.drawDetections(canvas, resized);
 
-      const bestMatch = faceMatcherRef.current.findBestMatch(detection.descriptor);
+      const matcher = faceMatcherRef.current;
+      if (!matcher) return;
+      const bestMatch = matcher.findBestMatch(detection.descriptor);
       if (bestMatch.label !== 'unknown') {
         setStatus('✅ ยืนยันตัวตนสำเร็จ');
         stopDetection();
