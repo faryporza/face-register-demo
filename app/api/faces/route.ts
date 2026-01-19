@@ -13,8 +13,12 @@ export async function GET() {
 
     const fileData = fs.readFileSync(filePath, 'utf8');
     const faces = JSON.parse(fileData);
+    const sanitizedFaces = faces.map((face: any) => {
+      const { password, ...rest } = face;
+      return rest;
+    });
 
-    return NextResponse.json(faces);
+    return NextResponse.json(sanitizedFaces);
   } catch (error) {
     console.error('Error loading faces:', error);
     return NextResponse.json({ error: 'Failed to load faces' }, { status: 500 });

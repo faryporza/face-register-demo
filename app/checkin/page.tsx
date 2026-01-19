@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 export default function CheckIn() {
   const router = useRouter();
   const [status, setStatus] = useState('กำลังโหลดระบบ...');
+  const [distanceStatus, setDistanceStatus] = useState<string>(''); 
   const [lastCheckIn, setLastCheckIn] = useState<string | null>(null);
   
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -17,6 +18,10 @@ export default function CheckIn() {
   // ตัวแปรกันบันทึกซ้ำ (Cooldown)
   const isProcessingRef = useRef(false);
   const lastLoggedNameRef = useRef<string | null>(null);
+
+  // ค่ากำหนดสำหรับโซนและการตรวจจับ
+  const ZONE_SIZE = 300; // ขนาดของกรอบสี่เหลี่ยมเป้าหมาย
+  const MIN_FACE_WIDTH = 180; // ขนาดใบหน้าขั้นต่ำ (ยิ่งมากยิ่งต้องใกล้)
 
   // 1. โหลด Model และ ข้อมูลใบหน้า
   useEffect(() => {
@@ -143,7 +148,6 @@ export default function CheckIn() {
       
       faceapi.matchDimensions(canvasRef.current, displaySize);
 
-      // detectAllFaces จะจับได้ดีกว่า SingleFace กรณีมีสิ่งปิดบัง
       const detections = await faceapi.detectAllFaces(videoRef.current)
         .withFaceLandmarks()
         .withFaceDescriptors();
@@ -154,24 +158,60 @@ export default function CheckIn() {
       const context = canvasRef.current.getContext('2d');
       context?.clearRect(0, 0, displaySize.width, displaySize.height);
 
+      // วาดกรอบเป้าหมาย (Zone) ตรงกลาง
+      const zoneX = (displaySize.width - ZONE_SIZE) / 2;
+      const zoneY = (displaySize.height - ZONE_SIZE) / 2;
+      context!.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+      context!.setLineDash([5, 5]);
+      context!.strokeRect(zoneX, zoneY, ZONE_SIZE, ZONE_SIZE);
+      context!.setLineDash([]);
+
+      let currentStatus = "";
+      let foundValidFace = false;
+
       resizedDetections.forEach(result => {
         if (!canvasRef.current) return;
         const { descriptor } = result;
-        const bestMatch = faceMatcherRef.current!.findBestMatch(descriptor);
-        
-        // วาดกรอบ
         const box = result.detection.box;
-        const drawBox = new faceapi.draw.DrawBox(box, { 
-            label: bestMatch.toString(),
-            boxColor: bestMatch.label === 'unknown' ? 'red' : 'green'
-        });
-        drawBox.draw(canvasRef.current);
+        
+        // 1. ตรวจสอบว่าอยู่ตรงกลางโซนหรือไม่
+        const faceCenterX = box.x + box.width / 2;
+        const faceCenterY = box.y + box.height / 2;
+        const isInZone = faceCenterX > zoneX && faceCenterX < zoneX + ZONE_SIZE &&
+                         faceCenterY > zoneY && faceCenterY < zoneY + ZONE_SIZE;
 
-        // ถ้าเจอคนที่รู้จัก และไม่อยู่ในช่วง Cooldown -> บันทึก Log
-        if (bestMatch.label !== 'unknown' && !isProcessingRef.current) {
-            logCheckIn(bestMatch.label);
+        // 2. ตรวจสอบระยะ (ความกว้างของใบหน้า)
+        const isCloseEnough = box.width >= MIN_FACE_WIDTH;
+
+        if (isInZone && isCloseEnough) {
+          foundValidFace = true;
+          const bestMatch = faceMatcherRef.current!.findBestMatch(descriptor);
+          
+          const drawBox = new faceapi.draw.DrawBox(box, { 
+              label: bestMatch.toString(),
+              boxColor: bestMatch.label === 'unknown' ? 'red' : '#00ff00'
+          });
+          drawBox.draw(canvasRef.current);
+
+          if (bestMatch.label !== 'unknown' && !isProcessingRef.current) {
+              logCheckIn(bestMatch.label);
+          }
+          currentStatus = 'ระยะเหมาะสม';
+        } else if (isInZone && !isCloseEnough) {
+          currentStatus = 'กรุณาขยับหน้าเข้ามาใกล้กล้องอีก';
+          // วาดกรอบสีเหลืองเตือนว่าไกลไป
+          context!.strokeStyle = 'yellow';
+          context!.strokeRect(box.x, box.y, box.width, box.height);
+        } else if (!isInZone) {
+          currentStatus = 'กรุณาวางใบหน้าในกรอบ';
         }
       });
+
+      if (detections.length === 0) {
+        currentStatus = "";
+      }
+      
+      setDistanceStatus(currentStatus);
 
     }, 200); // ตรวจทุก 200ms
   };
@@ -200,6 +240,12 @@ export default function CheckIn() {
       <div className="mt-6 flex flex-col items-center gap-2">
          <p className="text-lg text-gray-300">{status}</p>
          
+         {distanceStatus && (
+            <p className={`text-xl font-bold animat-pulse ${distanceStatus === 'ระยะเหมาะสม' ? 'text-green-400' : 'text-yellow-400'}`}>
+                {distanceStatus}
+            </p>
+         )}
+
          {lastCheckIn && (
             <div className="bg-green-600 text-white px-6 py-3 rounded-xl animate-bounce mt-4 shadow-lg">
                 ✅ บันทึกสำเร็จ: <span className="font-bold text-xl">{lastCheckIn}</span>

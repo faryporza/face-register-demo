@@ -1,11 +1,23 @@
 import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
+import bcrypt from 'bcryptjs';
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
-    const { prefix, name, surname, phone, email, descriptor } = body;
+    const text = await req.text();
+    if (!text) {
+      return NextResponse.json({ success: false, message: 'Request body is empty' }, { status: 400 });
+    }
+    
+    let body;
+    try {
+      body = JSON.parse(text);
+    } catch (e) {
+      return NextResponse.json({ success: false, message: 'Invalid JSON' }, { status: 400 });
+    }
+
+    const { prefix, name, surname, phone, email, password, descriptor } = body;
 
     // ตำแหน่งไฟล์ที่จะบันทึก (data/faces.json)
     const dataDir = path.join(process.cwd(), 'data');
@@ -31,7 +43,15 @@ export async function POST(req: Request) {
       }
     }
 
+    // ป้องกันผู้ใช้ซ้ำ (อีเมลซ้ำ)
+    const hasDuplicateEmail = faces.some((face: any) => face.email === email);
+    if (hasDuplicateEmail) {
+      return NextResponse.json({ success: false, message: 'อีเมลนี้ถูกใช้งานแล้ว' }, { status: 409 });
+    }
+
     // เพิ่มข้อมูลใหม่
+    const passwordHash = password ? await bcrypt.hash(password, 10) : '';
+
     const newRecord = {
       id: Date.now(),
       prefix,
@@ -40,6 +60,7 @@ export async function POST(req: Request) {
       phone,
       email,
       type: 'user', // Default type is user
+      password: passwordHash,
       descriptor, // ข้อมูลใบหน้า (Array ของตัวเลข)
       timestamp: new Date().toISOString()
     };

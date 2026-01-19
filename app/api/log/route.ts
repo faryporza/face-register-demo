@@ -4,7 +4,18 @@ import path from 'path';
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
+    const text = await req.text();
+    if (!text) {
+      return NextResponse.json({ success: false, message: 'Request body is empty' }, { status: 400 });
+    }
+    
+    let body;
+    try {
+      body = JSON.parse(text);
+    } catch (e) {
+      return NextResponse.json({ success: false, message: 'Invalid JSON' }, { status: 400 });
+    }
+
     const { name, surname, status } = body;
 
     const dataDir = path.join(process.cwd(), 'data');

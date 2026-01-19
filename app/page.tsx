@@ -5,14 +5,19 @@ import * as faceapi from 'face-api.js';
 export default function Home() {
   const [step, setStep] = useState(1); // 1: กรอกข้อมูล, 2: สแกนหน้า
   const [subStep, setSubStep] = useState(0); // 0: หน้าตรง, 1: หันซ้าย, 2: หันขวา, 3: พร้อมบันทึก
-  const [formData, setFormData] = useState({ prefix: 'นาย', name: '', surname: '', phone: '', email: '' });
+  const [formData, setFormData] = useState({ prefix: 'นาย', name: '', surname: '', phone: '', email: '', password: '', confirmPassword: '' });
   const [loadingModel, setLoadingModel] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [status, setStatus] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const detectInterval = useRef<NodeJS.Timeout | null>(null);
+
+  // ค่ากำหนดสำหรับตรวจระยะ
+  const MIN_FACE_WIDTH = 180; // ขนาดใบหน้าขั้นต่ำ (ยิ่งมากยิ่งต้องใกล้)
 
 // 1. โหลด Model
   useEffect(() => {
@@ -96,6 +101,14 @@ export default function Home() {
       const resizedDetections = faceapi.resizeResults(detections, displaySize);
       faceapi.draw.drawFaceLandmarks(canvas, resizedDetections);
 
+      // --- ตรวจระยะใบหน้า ---
+      const box = detections.detection.box;
+      const isCloseEnough = box.width >= MIN_FACE_WIDTH;
+      if (!isCloseEnough) {
+        setStatus('🟠 กรุณาขยับหน้าเข้ามาใกล้กล้อง');
+        return;
+      }
+
       // --- Logic เช็คหันซ้าย/ขวา ---
       const landmarks = detections.landmarks;
       const nose = landmarks.getNose()[3]; // ปลายจมูก
@@ -112,7 +125,7 @@ export default function Home() {
       
       // อัพเดทสถานะ (ใช้ state callback เพื่อให้ได้ค่าล่าสุดเสมอ)
       setSubStep((prevStep) => {
-        if (prevStep === 0) { // หน้าตรง
+           if (prevStep === 0) { // หน้าตรง
              setStatus('🔵 มองหน้าตรงค้างไว้');
              // ยอมรับช่วง 0.8 - 1.2
              if (ratio > 0.8 && ratio < 1.5) return 1; 
@@ -147,7 +160,8 @@ export default function Home() {
   };
 
   const handleNext = () => {
-    if (!formData.name || !formData.surname || !formData.phone || !formData.email) return alert('กรอกข้อมูลให้ครบ');
+    if (!formData.name || !formData.surname || !formData.phone || !formData.email || !formData.password || !formData.confirmPassword) return alert('กรอกข้อมูลให้ครบ');
+    if (formData.password !== formData.confirmPassword) return alert('รหัสผ่านไม่ตรงกัน');
     setStep(2);
     setSubStep(0);
     // รอ Video Element render เสร็จแล้วค่อยเปิดกล้อง
@@ -182,6 +196,7 @@ export default function Home() {
                 surname: formData.surname,
                 phone: formData.phone,
                 email: formData.email,
+                password: formData.password,
                 descriptor: descriptorArray
             })
         });
@@ -268,6 +283,49 @@ export default function Home() {
               />
             </div>
 
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">รหัสผ่าน <span className="text-red-500">*</span></label>
+              <div className="relative">
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  className="w-full border border-gray-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none pr-12"
+                  value={formData.password}
+                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                  placeholder="อย่างน้อย 6 ตัวอักษร"
+                  minLength={6}
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((prev) => !prev)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-500 hover:text-gray-700"
+                >
+                  {showPassword ? 'ซ่อน' : 'แสดง'}
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">ยืนยันรหัสผ่าน <span className="text-red-500">*</span></label>
+              <div className="relative">
+                <input
+                  type={showConfirmPassword ? 'text' : 'password'}
+                  className="w-full border border-gray-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none pr-12"
+                  value={formData.confirmPassword}
+                  onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
+                  placeholder="ยืนยันรหัสผ่านอีกครั้ง"
+                  minLength={6}
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPassword((prev) => !prev)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-500 hover:text-gray-700"
+                >
+                </button>
+              </div>
+            </div>
+
             <button
               onClick={handleNext}
               disabled={loadingModel}
@@ -275,6 +333,10 @@ export default function Home() {
             >
               {loadingModel ? 'กำลังโหลด AI...' : 'เริ่มต้นสแกน'}
             </button>
+
+            <div className="text-center text-sm text-gray-500">
+              มีบัญชีแล้ว? <a className="text-blue-600 hover:underline" href="/login">เข้าสู่ระบบ</a>
+            </div>
           </div>
         )}
 
