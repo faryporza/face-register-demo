@@ -27,8 +27,8 @@ export default function LoginPage() {
       const MODEL_URL = '/models';
       try {
         await Promise.all([
-          faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL),
-          faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+          faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+          faceapi.nets.faceLandmark68TinyNet.loadFromUri(MODEL_URL),
           faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL)
         ]);
         setLoadingModel(false);
@@ -127,8 +127,8 @@ export default function LoginPage() {
       if (video.paused || video.ended || video.readyState !== 4) return;
 
       const detection = await faceapi
-        .detectSingleFace(video)
-        .withFaceLandmarks()
+        .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
+        .withFaceLandmarks(true)
         .withFaceDescriptor();
 
       const context = canvas.getContext('2d');

@@ -25,14 +25,9 @@ export default function Home() {
       const MODEL_URL = '/models'; 
       try {
         await Promise.all([
-          // ตัวนี้ชื่อถูกแล้ว
-          faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL), 
-          
-          // *** แก้บรรทัดนี้: เติม Net ต่อท้าย ***
-          faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
-          
-          // *** แก้บรรทัดนี้: เติม Net ต่อท้าย ***
-          faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL) 
+          faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+          faceapi.nets.faceLandmark68TinyNet.loadFromUri(MODEL_URL),
+          faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL)
         ]);
         console.log('Models Loaded');
         setLoadingModel(false);
@@ -84,8 +79,9 @@ export default function Home() {
       if (video.paused || video.ended || video.readyState !== 4) return;
 
       // ตรวจจับใบหน้า
-      const detections = await faceapi.detectSingleFace(video)
-        .withFaceLandmarks();
+      const detections = await faceapi
+        .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
+        .withFaceLandmarks(true);
 
       const context = canvas.getContext('2d');
       if (context) {
@@ -175,9 +171,10 @@ export default function Home() {
 
     try {
         // ตรวจจับครั้งสุดท้ายเพื่อบันทึก Descriptor
-        const detection = await faceapi.detectSingleFace(videoRef.current)
-            .withFaceLandmarks()
-            .withFaceDescriptor();
+        const detection = await faceapi
+          .detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions())
+          .withFaceLandmarks(true)
+          .withFaceDescriptor();
 
         if (!detection) {
             setStatus('❌ ไม่พบใบหน้าขณะบันทึก');

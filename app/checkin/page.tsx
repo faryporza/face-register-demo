@@ -29,8 +29,8 @@ export default function CheckIn() {
       const MODEL_URL = '/models';
       try {
         await Promise.all([
-          faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL),
-          faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+          faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+          faceapi.nets.faceLandmark68TinyNet.loadFromUri(MODEL_URL),
           faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL)
         ]);
 
@@ -139,8 +139,9 @@ export default function CheckIn() {
       
       faceapi.matchDimensions(canvasRef.current, displaySize);
 
-      const detections = await faceapi.detectAllFaces(videoRef.current)
-        .withFaceLandmarks()
+      const detections = await faceapi
+        .detectAllFaces(videoRef.current, new faceapi.TinyFaceDetectorOptions())
+        .withFaceLandmarks(true)
         .withFaceDescriptors();
 
       const resizedDetections = faceapi.resizeResults(detections, displaySize);
