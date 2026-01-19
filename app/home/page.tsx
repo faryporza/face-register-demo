@@ -1,27 +1,9 @@
 'use client';
 import React, { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import {
-  User,
-  LogOut,
-  Calendar,
-  Mail,
-  Phone,
-  LayoutDashboard,
-  Activity,
-  Menu,
-  X,
-  CheckCircle
-} from 'lucide-react';
-import {
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer
-} from 'recharts';
+import useHydratedUser from './_components/useHydratedUser';
+import { Calendar, Mail, Phone, LayoutDashboard, Activity, CheckCircle } from 'lucide-react';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import HomeShell from './_components/HomeShell';
 
 type LogItem = {
   timestamp: string;
@@ -31,20 +13,9 @@ type LogItem = {
 };
 
 export default function AttendanceDashboard() {
-  const router = useRouter();
-  const [user, setUser] = useState<any>(null);
+  const user = useHydratedUser();
   const [logs, setLogs] = useState<LogItem[]>([]);
   const [logsError, setLogsError] = useState<string>('');
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-
-  useEffect(() => {
-    const storedUser = localStorage.getItem('currentUser');
-    if (!storedUser) {
-      router.push('/login');
-      return;
-    }
-    setUser(JSON.parse(storedUser));
-  }, [router]);
 
   useEffect(() => {
     const loadLogs = async () => {
@@ -66,7 +37,7 @@ export default function AttendanceDashboard() {
 
   const handleLogout = () => {
     localStorage.removeItem('currentUser');
-    router.push('/login');
+    window.location.href = '/login';
   };
 
   const formatThaiDate = (dateString: string) => {
@@ -116,76 +87,8 @@ export default function AttendanceDashboard() {
   const avatar = `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(user.email || userName || 'user')}`;
 
   return (
-    <div className="min-h-screen bg-slate-50 font-sans text-slate-800 flex overflow-hidden">
-      {isSidebarOpen && (
-        <div
-          className="fixed inset-0 bg-black/50 z-20 lg:hidden"
-          onClick={() => setIsSidebarOpen(false)}
-        />
-      )}
-
-      <aside
-        className={`
-        fixed lg:static inset-y-0 left-0 z-30
-        w-64 bg-white shadow-xl lg:shadow-none border-r border-slate-200
-        transform transition-transform duration-300 ease-in-out
-        ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
-      `}
-      >
-        <div className="p-6 flex flex-col h-full">
-          <div className="flex items-center justify-between gap-3 mb-10">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-200">
-                <CheckCircle className="text-white w-6 h-6" />
-              </div>
-              <h1 className="text-xl font-bold text-slate-800 tracking-tight">TimeCheck<span className="text-indigo-600">.io</span></h1>
-            </div>
-            <button onClick={() => setIsSidebarOpen(false)} className="lg:hidden p-2 rounded-lg hover:bg-slate-100">
-              <X size={20} />
-            </button>
-          </div>
-
-          <nav className="flex-1 space-y-2">
-            <a href="#" className="flex items-center gap-3 px-4 py-3 bg-indigo-50 text-indigo-700 rounded-xl font-medium transition-colors">
-              <LayoutDashboard size={20} />
-              <span>ภาพรวม (Dashboard)</span>
-            </a>
-            <a href="#" className="flex items-center gap-3 px-4 py-3 text-slate-500 hover:bg-slate-50 hover:text-slate-800 rounded-xl font-medium transition-colors">
-              <User size={20} />
-              <span>ข้อมูลส่วนตัว</span>
-            </a>
-            <a href="#" className="flex items-center gap-3 px-4 py-3 text-slate-500 hover:bg-slate-50 hover:text-slate-800 rounded-xl font-medium transition-colors">
-              <Calendar size={20} />
-              <span>ประวัติการลงเวลา</span>
-            </a>
-          </nav>
-
-          <button
-            onClick={handleLogout}
-            className="flex items-center gap-3 px-4 py-3 text-red-500 hover:bg-red-50 rounded-xl font-medium transition-colors mt-auto"
-          >
-            <LogOut size={20} />
-            <span>ออกจากระบบ</span>
-          </button>
-        </div>
-      </aside>
-
-      <main className="flex-1 flex flex-col h-screen overflow-hidden">
-        <header className="lg:hidden bg-white p-4 flex items-center justify-between border-b border-slate-200 shadow-sm">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
-              <CheckCircle className="text-white w-5 h-5" />
-            </div>
-            <span className="font-bold text-lg">TimeCheck</span>
-          </div>
-          <button onClick={() => setIsSidebarOpen(true)} className="p-2 hover:bg-slate-100 rounded-lg">
-            <Menu size={24} />
-          </button>
-        </header>
-
-        <div className="flex-1 overflow-y-auto p-4 lg:p-8">
-          <div className="max-w-6xl mx-auto space-y-8">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <HomeShell user={user} active="dashboard" onLogout={handleLogout}>
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div>
                 <h2 className="text-2xl font-bold text-slate-900">ยินดีต้อนรับ, {user.name} 👋</h2>
                 <p className="text-slate-500 mt-1">จัดการเวลาและการลงทะเบียนของคุณได้ที่นี่</p>
@@ -194,9 +97,9 @@ export default function AttendanceDashboard() {
                 <p className="text-sm text-slate-400">วันที่ปัจจุบัน</p>
                 <p className="text-lg font-medium text-slate-700">{formatThaiDateLong(new Date().toISOString())}</p>
               </div>
-            </div>
+      </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="lg:col-span-1 bg-white rounded-2xl p-6 shadow-sm border border-slate-100 relative overflow-hidden group">
                 <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-50 rounded-full -mr-16 -mt-16 transition-transform group-hover:scale-110"></div>
 
@@ -244,7 +147,7 @@ export default function AttendanceDashboard() {
                 </div>
               </div>
 
-              <div className="lg:col-span-2 space-y-6">
+      <div className="lg:col-span-2 space-y-6">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col justify-between hover:shadow-md transition-shadow">
                     <div className="flex items-center gap-3 text-indigo-600 mb-2">
@@ -319,12 +222,12 @@ export default function AttendanceDashboard() {
                   )}
                 </div>
               </div>
-            </div>
+      </div>
 
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
               <div className="p-6 border-b border-slate-100 flex items-center justify-between">
                 <h3 className="font-bold text-lg text-slate-800">ล่าสุด 5 รายการ</h3>
-                <button className="text-sm text-indigo-600 font-medium hover:text-indigo-700">ดูทั้งหมด</button>
+                <a href="/home/logs" className="text-sm text-indigo-600 font-medium hover:text-indigo-700">ดูทั้งหมด</a>
               </div>
 
               <div className="overflow-x-auto">
@@ -375,10 +278,7 @@ export default function AttendanceDashboard() {
                   </tbody>
                 </table>
               </div>
-            </div>
-          </div>
-        </div>
-      </main>
-    </div>
+      </div>
+    </HomeShell>
   );
 }

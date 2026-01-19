@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
 import bcrypt from 'bcryptjs';
+import { getMongoClient } from '@/lib/mongodb';
 
 const isBcryptHash = (value: string) => value.startsWith('$2a$') || value.startsWith('$2b$') || value.startsWith('$2y$');
 
@@ -24,20 +23,15 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, message: 'Missing email or password' }, { status: 400 });
     }
 
-    const filePath = path.join(process.cwd(), 'data', 'faces.json');
-    if (!fs.existsSync(filePath)) {
-      return NextResponse.json({ success: false, message: 'User not found' }, { status: 404 });
-    }
+    const client = await getMongoClient();
+    const db = client.db();
+    const facesCollection = db.collection('faces');
 
-    const fileData = fs.readFileSync(filePath, 'utf8');
-    const faces = fileData ? JSON.parse(fileData) : [];
-
-    const userIndex = faces.findIndex((u: any) => u.email === email);
-    if (userIndex === -1) {
+    const user = await facesCollection.findOne({ email });
+    if (!user) {
       return NextResponse.json({ success: false, message: 'Invalid credentials' }, { status: 401 });
     }
 
-    const user = faces[userIndex];
     const storedPassword = user.password || '';
 
     let isValid = false;
@@ -56,12 +50,13 @@ export async function POST(req: Request) {
     // Upgrade legacy plaintext password to bcrypt
     if (storedPassword && !isBcryptHash(storedPassword)) {
       const newHash = await bcrypt.hash(password, 10);
-      faces[userIndex].password = newHash;
-      fs.writeFileSync(filePath, JSON.stringify(faces, null, 2));
+      await facesCollection.updateOne({ email }, { $set: { password: newHash } });
+      user.password = newHash;
     }
 
-    const { password: _password, ...safeUser } = faces[userIndex];
-    return NextResponse.json({ success: true, user: safeUser });
+    const { password: _password, ...safeUser } = user;
+    const normalizedUser = { ...safeUser, _id: user._id?.toString?.() || user._id };
+    return NextResponse.json({ success: true, user: normalizedUser });
   } catch (error) {
     console.error(error);
     return NextResponse.json({ success: false, message: 'Login error' }, { status: 500 });

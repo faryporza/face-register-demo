@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
+import { getMongoClient } from '@/lib/mongodb';
 
 export async function POST(req: Request) {
   try {
@@ -18,35 +17,22 @@ export async function POST(req: Request) {
 
     const { name, surname, status } = body;
 
-    const dataDir = path.join(process.cwd(), 'data');
-    const filePath = path.join(dataDir, 'logs.json');
-
-    // ตรวจสอบว่ามีโฟลเดอร์ data ไหม
-    if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir);
-    }
-
-    let logs = [];
-    if (fs.existsSync(filePath)) {
-      const fileData = fs.readFileSync(filePath, 'utf8');
-      if (fileData) {
-        try {
-          logs = JSON.parse(fileData);
-        } catch (e) {
-          console.error("Error parsing logs.json:", e);
-          logs = [];
-        }
-      }
-    }
+    const client = await getMongoClient();
+    const db = client.db();
+    const logsCollection = db.collection('logs');
 
     const now = new Date();
     const THIRTY_MINUTES_MS = 30 * 60 * 1000;
 
     // ตรวจสอบการบันทึกซ้ำ (30 นาที)
-    const lastEntry = [...logs].reverse().find(log => log.name === name && log.surname === surname);
-    
-    if (lastEntry) {
-      const lastTime = new Date(lastEntry.timestamp);
+    const lastEntry = await logsCollection
+      .find({ name, surname })
+      .sort({ timestamp: -1 })
+      .limit(1)
+      .toArray();
+
+    if (lastEntry.length > 0) {
+      const lastTime = new Date(lastEntry[0].timestamp);
       if (now.getTime() - lastTime.getTime() < THIRTY_MINUTES_MS) {
         return NextResponse.json({ 
           success: true, 
@@ -64,8 +50,7 @@ export async function POST(req: Request) {
       status: status || 'CHECK_IN'
     };
 
-    logs.push(newLog);
-    fs.writeFileSync(filePath, JSON.stringify(logs, null, 2));
+    await logsCollection.insertOne(newLog);
 
     return NextResponse.json({ success: true, message: 'Log saved' });
 

@@ -109,17 +109,8 @@ export default function CheckIn() {
         } else {
             setLastCheckIn(fullName);
 
-            // ถ้าเป็น Admin ให้ Login และ Redirect
-            if (user && user.type === 'admin') {
-              localStorage.setItem('currentUser', JSON.stringify(user));
-              setStatus('ยืนยันตัวตนสำเร็จ (Admin)! กำลังเข้าสู่หน้าหลัก...');
-              setTimeout(() => {
-                router.push('/home');
-              }, 1500);
-            } else {
-              // ถ้าไม่ใช่ Admin ให้แค่บันทึก Check-in
-              setStatus('บันทึกเวลาสำเร็จ!');
-            }
+            // บันทึก Check-in เท่านั้น
+            setStatus('บันทึกเวลาสำเร็จ!');
         }
         
         lastLoggedNameRef.current = fullName;
