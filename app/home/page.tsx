@@ -1,3 +1,4 @@
+/* eslint-disable @next/next/no-img-element */
 'use client';
 import React, { useEffect, useMemo, useState } from 'react';
 import useHydratedUser from './_components/useHydratedUser';
@@ -20,20 +21,33 @@ export default function AttendanceDashboard() {
   useEffect(() => {
     const loadLogs = async () => {
       try {
-        const response = await fetch('/api/logs');
+        if (!user || user?.type?.toLowerCase?.() !== 'admin') {
+          setLogs([]);
+          return;
+        }
+
+        const response = await fetch('/api/checkin-logs', {
+          headers: {
+            'x-user-email': user.email || ''
+          }
+        });
+        if (response.status === 403) {
+          setLogsError('เฉพาะผู้ดูแลระบบเท่านั้น');
+          return;
+        }
         const data = await response.json();
         if (Array.isArray(data)) {
           setLogs(data);
         } else {
           setLogsError('ไม่สามารถโหลดข้อมูลบันทึกได้');
         }
-      } catch (error) {
+      } catch {
         setLogsError('ไม่สามารถโหลดข้อมูลบันทึกได้');
       }
     };
 
     loadLogs();
-  }, []);
+  }, [user]);
 
   const handleLogout = () => {
     localStorage.removeItem('currentUser');
@@ -227,7 +241,11 @@ export default function AttendanceDashboard() {
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
               <div className="p-6 border-b border-slate-100 flex items-center justify-between">
                 <h3 className="font-bold text-lg text-slate-800">ล่าสุด 5 รายการ</h3>
-                <a href="/home/logs" className="text-sm text-indigo-600 font-medium hover:text-indigo-700">ดูทั้งหมด</a>
+                {user?.type?.toLowerCase?.() === 'admin' ? (
+                  <a href="/home/checkins" className="text-sm text-indigo-600 font-medium hover:text-indigo-700">ดูทั้งหมด</a>
+                ) : (
+                  <span className="text-sm text-slate-400">เฉพาะผู้ดูแลระบบ</span>
+                )}
               </div>
 
               <div className="overflow-x-auto">

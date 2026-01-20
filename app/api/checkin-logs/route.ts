@@ -5,7 +5,7 @@ export async function GET(req: Request) {
   try {
     const client = await getMongoClient();
     const db = client.db();
-    const logsCollection = db.collection('audit_logs');
+    const logsCollection = db.collection('logs');
     const facesCollection = db.collection('faces');
 
     const url = new URL(req.url);
@@ -15,13 +15,9 @@ export async function GET(req: Request) {
     const page = pageParam ? Math.max(parseInt(pageParam, 10), 1) : null;
     const limit = limitParam ? Math.max(parseInt(limitParam, 10), 1) : null;
 
-    const event = url.searchParams.get('event');
+    const name = url.searchParams.get('name');
+    const surname = url.searchParams.get('surname');
     const status = url.searchParams.get('status');
-    const email = url.searchParams.get('email');
-    const userId = url.searchParams.get('userId');
-    const route = url.searchParams.get('route');
-    const method = url.searchParams.get('method');
-    const errorCode = url.searchParams.get('errorCode');
     const from = url.searchParams.get('from');
     const to = url.searchParams.get('to');
 
@@ -37,17 +33,9 @@ export async function GET(req: Request) {
     }
 
     const query: Record<string, unknown> = {};
-    if (event) {
-      query.event = event;
-    } else {
-      query.event = { $nin: ['admin-log-view', 'admin-checkin-log-view'] };
-    }
+    if (name) query.name = name;
+    if (surname) query.surname = surname;
     if (status) query.status = status;
-    if (email) query.email = email;
-    if (userId) query.userId = userId;
-    if (route) query.route = route;
-    if (method) query.method = method;
-    if (errorCode) query.errorCode = errorCode;
 
     if (from || to) {
       const range: { $gte?: string; $lte?: string } = {};
@@ -84,7 +72,7 @@ export async function GET(req: Request) {
 
     return NextResponse.json(normalizedLogs);
   } catch (error) {
-    console.error('Error loading logs:', error);
-    return NextResponse.json({ error: 'Failed to load logs' }, { status: 500 });
+    console.error('Error loading check-in logs:', error);
+    return NextResponse.json({ error: 'Failed to load check-in logs' }, { status: 500 });
   }
 }

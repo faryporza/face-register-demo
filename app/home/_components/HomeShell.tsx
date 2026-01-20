@@ -12,9 +12,13 @@ import {
   Users
 } from 'lucide-react';
 
+type HomeShellUser = {
+  type?: string;
+};
+
 type HomeShellProps = {
-  user: any;
-  active: 'dashboard' | 'profile' | 'logs' | 'users';
+  user: HomeShellUser;
+  active: 'dashboard' | 'profile' | 'logs' | 'users' | 'checkins';
   onLogout: () => void;
   children: ReactNode;
 };
@@ -71,10 +75,18 @@ export default function HomeShell({ user, active, onLogout, children }: HomeShel
               <User size={20} />
               <span>ข้อมูลส่วนตัว</span>
             </Link>
-            <Link href="/home/logs" className={navItemClass(active === 'logs')}>
-              <Calendar size={20} />
-              <span>ประวัติการลงเวลา</span>
-            </Link>
+            {isAdmin && (
+              <Link href="/home/checkins" className={navItemClass(active === 'checkins')}>
+                <Calendar size={20} />
+                <span>ประวัติการลงเวลา</span>
+              </Link>
+            )}
+            {isAdmin && (
+              <Link href="/home/logs" className={navItemClass(active === 'logs')}>
+                <Calendar size={20} />
+                <span>บันทึกระบบ</span>
+              </Link>
+            )}
             {isAdmin && (
               <Link href="/home/users" className={navItemClass(active === 'users')}>
                 <Users size={20} />

@@ -2,6 +2,13 @@
 import { useEffect, useRef, useState } from 'react';
 import * as faceapi from 'face-api.js';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+
+type MatchedUser = {
+  email?: string;
+  descriptor?: number[];
+  [key: string]: unknown;
+};
 
 export default function LoginPage() {
   const router = useRouter();
@@ -9,7 +16,6 @@ export default function LoginPage() {
   const [formData, setFormData] = useState({ email: '', password: '' });
   const [status, setStatus] = useState('กำลังโหลดระบบ...');
   const [loadingModel, setLoadingModel] = useState(true);
-  const [matchedUser, setMatchedUser] = useState<any>(null);
 
   // ค่ากำหนดสำหรับตรวจระยะ
   const MIN_FACE_WIDTH = 180; // ขนาดใบหน้าขั้นต่ำ (ยิ่งมากยิ่งต้องใกล้)
@@ -22,13 +28,29 @@ export default function LoginPage() {
   const matchCountRef = useRef(0);
   const stableCountRef = useRef(0);
   const lastMatchLabelRef = useRef<string | null>(null);
-  const matchedUserRef = useRef<any>(null);
+  const matchedUserRef = useRef<MatchedUser | null>(null);
+  const lastFailReasonRef = useRef<string | null>(null);
+  const lastFailAtRef = useRef(0);
 
   const STABLE_REQUIRED = 6; // ~1.2s
   const DETECTOR_INPUT_SIZE = 192; // มือถือ 160-192
   const DETECTOR_SCORE_THRESHOLD = 0.6;
   const ZONE_W = 220;
   const ZONE_H = 300;
+
+  const stopDetection = () => {
+    if (intervalRef.current) clearInterval(intervalRef.current);
+  };
+
+  const stopVideo = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+  };
 
   useEffect(() => {
     const loadModels = async () => {
@@ -55,20 +77,6 @@ export default function LoginPage() {
     };
   }, []);
 
-  const stopDetection = () => {
-    if (intervalRef.current) clearInterval(intervalRef.current);
-  };
-
-  const stopVideo = () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
-    }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
-  };
-
   const startVideo = () => {
     setStatus('กำลังเปิดกล้อง...');
     navigator.mediaDevices
@@ -83,6 +91,46 @@ export default function LoginPage() {
         console.error(err);
         setStatus('ไม่สามารถเปิดกล้องได้');
       });
+  };
+
+  const logScanFail = async (reason: string, message: string, bestMatch?: string) => {
+    const now = Date.now();
+    if (lastFailReasonRef.current === reason && now - lastFailAtRef.current < 10_000) return;
+    lastFailReasonRef.current = reason;
+    lastFailAtRef.current = now;
+
+    try {
+      await fetch('/api/log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          eventType: 'LOGIN_SCAN_FAIL',
+          reason,
+          distanceStatus: message,
+          bestMatch,
+          source: 'login',
+          email: (matchedUserRef.current?.email || formData.email || '').trim().toLowerCase()
+        })
+      });
+    } catch (error) {
+      console.error('Login scan fail log error', error);
+    }
+  };
+
+  const logScanSuccess = async () => {
+    try {
+      await fetch('/api/log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          eventType: 'LOGIN_SCAN_SUCCESS',
+          source: 'login',
+          email: (matchedUserRef.current?.email || formData.email || '').trim().toLowerCase()
+        })
+      });
+    } catch (error) {
+      console.error('Login scan success log error', error);
+    }
   };
 
   const handleLogin = async () => {
@@ -105,7 +153,6 @@ export default function LoginPage() {
 
       const user = result.user;
       matchedUserRef.current = user;
-      setMatchedUser(user);
       const descriptor = new Float32Array(user.descriptor);
       const labeledDescriptor = new faceapi.LabeledFaceDescriptors(user.email, [descriptor]);
       // Threshold กลาง ๆ เพื่อให้แมสยังพอได้ แต่ลด false positive
@@ -162,6 +209,7 @@ export default function LoginPage() {
         stableCountRef.current = 0;
         matchCountRef.current = 0;
         setStatus('❌ ไม่พบใบหน้า (ขยับเข้ามาในกรอบ)');
+        logScanFail('NO_FACE', 'ไม่พบใบหน้า (ขยับเข้ามาในกรอบ)');
         return;
       }
 
@@ -172,6 +220,7 @@ export default function LoginPage() {
         stableCountRef.current = 0;
         matchCountRef.current = 0;
         setStatus('🟠 กรุณาขยับหน้าเข้ามาใกล้กล้อง');
+        logScanFail('TOO_FAR', 'กรุณาขยับหน้าเข้ามาใกล้กล้อง');
         return;
       }
 
@@ -180,6 +229,7 @@ export default function LoginPage() {
         stableCountRef.current = 0;
         matchCountRef.current = 0;
         setStatus('🟥 กรุณาอยู่ในกรอบกลาง');
+        logScanFail('OUT_OF_ZONE', 'กรุณาอยู่ในกรอบกลาง');
         return;
       }
 
@@ -198,6 +248,7 @@ export default function LoginPage() {
         }
 
         setStatus('✅ ยืนยันตัวตนสำเร็จ');
+        logScanSuccess();
         stopDetection();
         stopVideo();
         localStorage.setItem('currentUser', JSON.stringify(matchedUserRef.current));
@@ -207,6 +258,7 @@ export default function LoginPage() {
         matchCountRef.current = 0;
         lastMatchLabelRef.current = null;
         setStatus('❌ ใบหน้าไม่ตรงกับบัญชีนี้');
+        logScanFail('UNKNOWN_FACE', 'ใบหน้าไม่ตรงกับบัญชีนี้', bestMatch.toString());
       }
     }, 200);
   };
@@ -251,7 +303,7 @@ export default function LoginPage() {
             </button>
 
             <div className="text-center text-sm text-gray-500">
-              ยังไม่มีบัญชี? <a className="text-blue-600 hover:underline" href="/">ลงทะเบียน</a>
+              ยังไม่มีบัญชี? <Link className="text-blue-600 hover:underline" href="/">ลงทะเบียน</Link>
             </div>
           </div>
         )}

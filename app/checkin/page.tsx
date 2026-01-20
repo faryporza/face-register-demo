@@ -1,10 +1,15 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
 import * as faceapi from 'face-api.js';
-import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+
+type FaceUser = {
+  name: string;
+  surname: string;
+  descriptor: number[];
+};
 
 export default function CheckIn() {
-  const router = useRouter();
   const [status, setStatus] = useState('กำลังโหลดระบบ...');
   const [distanceStatus, setDistanceStatus] = useState<string>(''); 
   const [lastCheckIn, setLastCheckIn] = useState<string | null>(null);
@@ -13,15 +18,30 @@ export default function CheckIn() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const faceMatcherRef = useRef<faceapi.FaceMatcher | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
-  const usersRef = useRef<any[]>([]);
+  const usersRef = useRef<FaceUser[]>([]);
   
   // ตัวแปรกันบันทึกซ้ำ (Cooldown)
   const isProcessingRef = useRef(false);
   const lastLoggedNameRef = useRef<string | null>(null);
+  const lastFailReasonRef = useRef<string | null>(null);
+  const lastFailAtRef = useRef(0);
 
   // ค่ากำหนดสำหรับโซนและการตรวจจับ
   const ZONE_SIZE = 300; // ขนาดของกรอบสี่เหลี่ยมเป้าหมาย
   const MIN_FACE_WIDTH = 180; // ขนาดใบหน้าขั้นต่ำ (ยิ่งมากยิ่งต้องใกล้)
+
+  const startVideo = () => {
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } })
+        .then(stream => {
+            if (videoRef.current) videoRef.current.srcObject = stream;
+        })
+        .catch(err => {
+            console.error(err);
+            setStatus('ไม่สามารถเปิดกล้องได้');
+        });
+    }
+  };
 
   // 1. โหลด Model และ ข้อมูลใบหน้า
   useEffect(() => {
@@ -36,7 +56,7 @@ export default function CheckIn() {
 
         // ดึงข้อมูลคนจาก API
         const response = await fetch('/api/faces');
-        const users = await response.json();
+        const users = (await response.json()) as FaceUser[];
         usersRef.current = users;
 
         if (users.length === 0) {
@@ -45,7 +65,7 @@ export default function CheckIn() {
         }
 
         // แปลงข้อมูลเป็น LabeledFaceDescriptors
-        const labeledDescriptors = users.map((user: any) => {
+        const labeledDescriptors = users.map((user) => {
           const descriptor = new Float32Array(user.descriptor);
           return new faceapi.LabeledFaceDescriptors(`${user.name} ${user.surname}`, [descriptor]);
         });
@@ -68,19 +88,6 @@ export default function CheckIn() {
     };
   }, []);
 
-  const startVideo = () => {
-    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } })
-        .then(stream => {
-            if (videoRef.current) videoRef.current.srcObject = stream;
-        })
-        .catch(err => {
-            console.error(err);
-            setStatus('ไม่สามารถเปิดกล้องได้');
-        });
-    }
-  };
-
   // 2. ฟังก์ชันบันทึก Log และ Login
   const logCheckIn = async (fullName: string) => {
     // ถ้าเพิ่งบันทึกคนนี้ไปเมื่อกี้ ไม่ต้องบันทึกซ้ำ
@@ -91,9 +98,6 @@ export default function CheckIn() {
         const parts = fullName.split(' ');
         const name = parts[0];
         const surname = parts.slice(1).join(' '); // กรณีมีนามสกุลหลายคำ
-        
-        // ค้นหาข้อมูลผู้ใช้เต็มรูปแบบ
-        const user = usersRef.current.find(u => u.name === name && u.surname === surname);
         
         // ส่ง API บันทึก Log
         const response = await fetch('/api/log', {
@@ -124,6 +128,29 @@ export default function CheckIn() {
     } catch (error) {
         console.error('Log Error', error);
         isProcessingRef.current = false;
+    }
+  };
+
+  const logScanFail = async (reason: string, message: string, bestMatch?: string) => {
+    const now = Date.now();
+    if (lastFailReasonRef.current === reason && now - lastFailAtRef.current < 10_000) return;
+    lastFailReasonRef.current = reason;
+    lastFailAtRef.current = now;
+
+    try {
+      await fetch('/api/log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          eventType: 'SCAN_FAIL',
+          reason,
+          distanceStatus: message,
+          bestMatch,
+          source: 'checkin'
+        })
+      });
+    } catch (error) {
+      console.error('Scan fail log error', error);
     }
   };
 
@@ -160,6 +187,9 @@ export default function CheckIn() {
 
       let currentStatus = "";
       let foundValidFace = false;
+      let failReason: string | null = null;
+      let failMessage = '';
+      let failBestMatch: string | undefined;
 
       resizedDetections.forEach(result => {
         if (!canvasRef.current) return;
@@ -187,23 +217,40 @@ export default function CheckIn() {
 
           if (bestMatch.label !== 'unknown' && !isProcessingRef.current) {
               logCheckIn(bestMatch.label);
+              currentStatus = 'ระยะเหมาะสม';
+          } else if (bestMatch.label === 'unknown') {
+              currentStatus = 'ไม่พบใบหน้าที่ตรงกับฐานข้อมูล';
+              failReason = 'UNKNOWN_FACE';
+              failMessage = currentStatus;
+              failBestMatch = bestMatch.toString();
+          } else {
+              currentStatus = 'ระยะเหมาะสม';
           }
-          currentStatus = 'ระยะเหมาะสม';
         } else if (isInZone && !isCloseEnough) {
           currentStatus = 'กรุณาขยับหน้าเข้ามาใกล้กล้องอีก';
+          failReason = 'TOO_FAR';
+          failMessage = currentStatus;
           // วาดกรอบสีเหลืองเตือนว่าไกลไป
           context!.strokeStyle = 'yellow';
           context!.strokeRect(box.x, box.y, box.width, box.height);
         } else if (!isInZone) {
           currentStatus = 'กรุณาวางใบหน้าในกรอบ';
+          failReason = 'OUT_OF_ZONE';
+          failMessage = currentStatus;
         }
       });
 
       if (detections.length === 0) {
         currentStatus = "";
+        failReason = 'NO_FACE';
+        failMessage = 'ไม่พบใบหน้า (ขยับเข้ามาในกรอบ)';
       }
       
       setDistanceStatus(currentStatus);
+
+      if (!foundValidFace && failReason) {
+        logScanFail(failReason, failMessage, failBestMatch);
+      }
 
     }, 200); // ตรวจทุก 200ms
   };
@@ -246,9 +293,9 @@ export default function CheckIn() {
       </div>
 
       <div className="mt-8 flex gap-4">
-        <a href="/" className="text-gray-400 hover:text-white underline text-sm transition-colors">
+        <Link href="/" className="text-gray-400 hover:text-white underline text-sm transition-colors">
             ไปหน้าลงทะเบียน
-        </a>
+        </Link>
       </div>
     </div>
   );
