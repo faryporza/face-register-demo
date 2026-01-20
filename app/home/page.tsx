@@ -267,7 +267,7 @@ export default function AttendanceDashboard() {
                                 }
                           `}
                             >
-                              {log.status === 'CHECK_IN' ? 'เข้างาน' : 'ออกงาน'}
+                              {log.status === 'CHECK_IN' ? 'เข้าเรียน' : 'ออกเรียน'}
                             </span>
                           </td>
                           <td className="px-6 py-4 text-sm text-slate-600">{formatThaiDate(log.timestamp)}</td>
