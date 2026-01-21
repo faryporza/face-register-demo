@@ -41,16 +41,19 @@ export default function CheckIn() {
   const ZONE_SIZE = 300; // ขนาดของกรอบสี่เหลี่ยมเป้าหมาย
   const MIN_FACE_WIDTH = 180; // ขนาดใบหน้าขั้นต่ำ (ยิ่งมากยิ่งต้องใกล้)
 
-  // === Adaptive Threshold สำหรับความแม่นยำ ===
-  // STRICT: ผ่านทันที (มั่นใจมาก)
+  // === Adaptive Threshold สำหรับความแม่นยำ (รองรับแมสก์) ===
+  // STRICT: ผ่านเร็ว (มั่นใจมาก)
   // NORMAL: ต้องยืนยันหลายเฟรม
+  // MASK: สวมแมส ต้องยืนยันนานมาก
   // REJECT: ไม่ผ่าน
-  const THRESHOLD_STRICT = 0.35;  // ถ้า distance < นี้ = แม่นมาก ผ่านเลย
+  const THRESHOLD_STRICT = 0.35;  // ถ้า distance < นี้ = แม่นมาก ผ่านเร็ว
   const THRESHOLD_NORMAL = 0.48;  // ถ้า distance < นี้ = ต้องยืนยัน N เฟรม
-  // ถ้า distance >= THRESHOLD_NORMAL = ไม่ผ่าน
+  const THRESHOLD_MASK = 0.55;    // ถ้า distance < นี้ = สวมแมส ต้องยืนยันหลายเฟรมมาก
+  // ถ้า distance >= THRESHOLD_MASK = ไม่ผ่าน
 
-  const STABLE_FRAMES_STRICT = 3;   // เฟรมที่ต้องติดต่อกัน (ถ้า distance ต่ำมาก)
-  const STABLE_FRAMES_NORMAL = 6;   // เฟรมที่ต้องติดต่อกัน (ถ้า distance ปานกลาง)
+  const STABLE_FRAMES_STRICT = 3;   // เฟรมที่ต้องติดต่อกัน (distance < 0.35)
+  const STABLE_FRAMES_NORMAL = 6;   // เฟรมที่ต้องติดต่อกัน (distance < 0.48)
+  const STABLE_FRAMES_MASK = 12;    // เฟรมที่ต้องติดต่อกัน (distance < 0.55) - ยืนยันนานเพื่อความแม่น
 
   const startVideo = () => {
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
@@ -92,8 +95,8 @@ export default function CheckIn() {
           return new faceapi.LabeledFaceDescriptors(`${user.name} ${user.surname}`, [descriptor]);
         });
 
-        // สร้าง Matcher (Threshold 0.52 รองรับแมส แต่ใช้ Adaptive Check ภายหลัง)
-        faceMatcherRef.current = new faceapi.FaceMatcher(labeledDescriptors, 0.52);
+        // สร้าง Matcher (Threshold 0.58 รองรับแมส แต่ใช้ Adaptive Check ภายหลังเพื่อกันผิดคน)
+        faceMatcherRef.current = new faceapi.FaceMatcher(labeledDescriptors, 0.58);
 
         setStatus('พร้อมใช้งาน (เข้าสู่ระบบด้วยใบหน้า)');
         startVideo();
@@ -266,15 +269,19 @@ export default function CheckIn() {
               // ปานกลาง - ต้อง 6 เฟรม
               requiredFrames = STABLE_FRAMES_NORMAL;
               boxColor = '#ffff00'; // เหลือง = กำลังยืนยัน
+            } else if (distance < THRESHOLD_MASK) {
+              // สวมแมส - ต้อง 12 เฟรม (ยืนยันนานเพื่อความแม่นยำ)
+              requiredFrames = STABLE_FRAMES_MASK;
+              boxColor = '#ffa500'; // ส้ม = ต้องยืนยันนานขึ้น
             } else {
               // ไม่ผ่าน threshold
               requiredFrames = 999; // ไม่มีทางผ่าน
-              boxColor = 'orange';
-              matchStatus = `⚠️ ${label} (${distance.toFixed(2)}) - ยังไม่มั่นใจ`;
+              boxColor = 'red';
+              matchStatus = `❌ ${label} (${distance.toFixed(2)}) - ไม่ตรง`;
             }
 
             // เพิ่ม stable count ถ้าผ่าน threshold
-            if (distance < THRESHOLD_NORMAL) {
+            if (distance < THRESHOLD_MASK) {
               tracker.stableCount += 1;
               tracker.lastDistance = distance;
 

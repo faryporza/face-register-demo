@@ -32,13 +32,15 @@ export default function LoginPage() {
   const lastFailReasonRef = useRef<string | null>(null);
   const lastFailAtRef = useRef(0);
 
-  // === Adaptive Threshold สำหรับ Login (เข้มงวดกว่า Check-in) ===
-  const THRESHOLD_STRICT = 0.38;   // ถ้า distance < นี้ = แม่นมาก ผ่านเร็ว
-  const THRESHOLD_NORMAL = 0.45;   // ถ้า distance < นี้ = ต้องยืนยันมากขึ้น
-  // ถ้า distance >= THRESHOLD_NORMAL = ไม่ผ่าน
+  // === Adaptive Threshold สำหรับ Login (รองรับแมสก์) ===
+  const THRESHOLD_STRICT = 0.38;   // ถ้า distance < นี้ = แม่นมาก ผ่านเร็ว (ไม่สวมแมส)
+  const THRESHOLD_NORMAL = 0.48;   // ถ้า distance < นี้ = ปานกลาง ต้องยืนยันมากขึ้น
+  const THRESHOLD_MASK = 0.55;     // ถ้า distance < นี้ = อาจสวมแมส ต้องยืนยันหลายเฟรมมาก
+  // ถ้า distance >= THRESHOLD_MASK = ไม่ผ่าน
 
-  const STABLE_STRICT = 5;    // เฟรมที่ต้องติดต่อกัน (ถ้า distance ต่ำมาก)
-  const STABLE_NORMAL = 9;    // เฟรมที่ต้องติดต่อกัน (ถ้า distance ปานกลาง)
+  const STABLE_STRICT = 4;    // เฟรมที่ต้องติดต่อกัน (distance < 0.38)
+  const STABLE_NORMAL = 8;    // เฟรมที่ต้องติดต่อกัน (distance < 0.48)
+  const STABLE_MASK = 15;     // เฟรมที่ต้องติดต่อกัน (distance < 0.55) - ยืนยันนานเพื่อความแม่น
 
   const DETECTOR_INPUT_SIZE = 192; // มือถือ 160-192
   const DETECTOR_SCORE_THRESHOLD = 0.4;
@@ -162,8 +164,8 @@ export default function LoginPage() {
       matchedUserRef.current = user;
       const descriptor = new Float32Array(user.descriptor);
       const labeledDescriptor = new faceapi.LabeledFaceDescriptors(user.email, [descriptor]);
-      // Threshold 0.48 รองรับแมส แต่ใช้ Adaptive Check ภายหลัง
-      faceMatcherRef.current = new faceapi.FaceMatcher([labeledDescriptor], 0.48);
+      // Threshold 0.58 รองรับแมส แต่ใช้ Adaptive Check ภายหลังเพื่อกันผิดคน
+      faceMatcherRef.current = new faceapi.FaceMatcher([labeledDescriptor], 0.58);
       matchCountRef.current = 0;
       stableCountRef.current = 0;
       lastMatchLabelRef.current = null;
@@ -251,27 +253,31 @@ export default function LoginPage() {
       // Debug: แสดง distance ใน console
       console.log(`[LOGIN] Face match: ${bestMatch.label}, distance: ${distance.toFixed(3)}`);
 
-      // === Adaptive Threshold Logic ===
+      // === Adaptive Threshold Logic (รองรับแมสก์) ===
       if (bestMatch.label !== 'unknown') {
         // กำหนดจำนวนเฟรมที่ต้องการตาม distance
         let requiredFrames: number;
         let statusIcon: string;
 
         if (distance < THRESHOLD_STRICT) {
-          // แม่นมาก - ต้อง 5 เฟรม
+          // แม่นมาก (ไม่สวมแมส) - ต้อง 4 เฟรม
           requiredFrames = STABLE_STRICT;
           statusIcon = '🟢';
         } else if (distance < THRESHOLD_NORMAL) {
-          // ปานกลาง - ต้อง 9 เฟรม (รองรับแมส)
+          // ปานกลาง - ต้อง 8 เฟรม
           requiredFrames = STABLE_NORMAL;
           statusIcon = '🟡';
+        } else if (distance < THRESHOLD_MASK) {
+          // อาจสวมแมส - ต้อง 15 เฟรม (ยืนยันนานเพื่อความแม่นยำ)
+          requiredFrames = STABLE_MASK;
+          statusIcon = '�';
         } else {
           // ไม่ผ่าน threshold - distance สูงเกินไป
           stableCountRef.current = 0;
           matchCountRef.current = 0;
           lastMatchLabelRef.current = null;
-          setStatus(`⚠️ ใบหน้าไม่ชัดเจน [${distance.toFixed(2)}] - ขยับหน้าให้ตรง/ถอดแมส`);
-          logScanFail('LOW_CONFIDENCE', `ใบหน้าไม่ชัด (distance: ${distance.toFixed(3)})`, bestMatch.toString());
+          setStatus(`⚠️ ใบหน้าไม่ตรงกับบัญชี [${distance.toFixed(2)}]`);
+          logScanFail('LOW_CONFIDENCE', `ใบหน้าไม่ตรง (distance: ${distance.toFixed(3)})`, bestMatch.toString());
           return;
         }
 
