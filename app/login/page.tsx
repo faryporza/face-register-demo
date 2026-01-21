@@ -32,7 +32,14 @@ export default function LoginPage() {
   const lastFailReasonRef = useRef<string | null>(null);
   const lastFailAtRef = useRef(0);
 
-  const STABLE_REQUIRED = 9; // ~1.2s
+  // === Adaptive Threshold สำหรับ Login (เข้มงวดกว่า Check-in) ===
+  const THRESHOLD_STRICT = 0.38;   // ถ้า distance < นี้ = แม่นมาก ผ่านเร็ว
+  const THRESHOLD_NORMAL = 0.45;   // ถ้า distance < นี้ = ต้องยืนยันมากขึ้น
+  // ถ้า distance >= THRESHOLD_NORMAL = ไม่ผ่าน
+
+  const STABLE_STRICT = 5;    // เฟรมที่ต้องติดต่อกัน (ถ้า distance ต่ำมาก)
+  const STABLE_NORMAL = 9;    // เฟรมที่ต้องติดต่อกัน (ถ้า distance ปานกลาง)
+
   const DETECTOR_INPUT_SIZE = 192; // มือถือ 160-192
   const DETECTOR_SCORE_THRESHOLD = 0.4;
   const ZONE_W = 220;
@@ -155,8 +162,8 @@ export default function LoginPage() {
       matchedUserRef.current = user;
       const descriptor = new Float32Array(user.descriptor);
       const labeledDescriptor = new faceapi.LabeledFaceDescriptors(user.email, [descriptor]);
-      // Threshold เข้มงวดขึ้น (0.42) เพื่อลด false positive
-      faceMatcherRef.current = new faceapi.FaceMatcher([labeledDescriptor], 0.42);
+      // Threshold 0.48 รองรับแมส แต่ใช้ Adaptive Check ภายหลัง
+      faceMatcherRef.current = new faceapi.FaceMatcher([labeledDescriptor], 0.48);
       matchCountRef.current = 0;
       stableCountRef.current = 0;
       lastMatchLabelRef.current = null;
@@ -240,16 +247,38 @@ export default function LoginPage() {
       if (!matcher) return;
       const bestMatch = matcher.findBestMatch(detection.descriptor);
       const distance = bestMatch.distance;
-      const MAX_DISTANCE = 0.42; // เช็คซ้ำอีกชั้น
 
       // Debug: แสดง distance ใน console
-      console.log(`Face match: ${bestMatch.label}, distance: ${distance.toFixed(3)}`);
+      console.log(`[LOGIN] Face match: ${bestMatch.label}, distance: ${distance.toFixed(3)}`);
 
-      if (bestMatch.label !== 'unknown' && distance <= MAX_DISTANCE) {
+      // === Adaptive Threshold Logic ===
+      if (bestMatch.label !== 'unknown') {
+        // กำหนดจำนวนเฟรมที่ต้องการตาม distance
+        let requiredFrames: number;
+        let statusIcon: string;
+
+        if (distance < THRESHOLD_STRICT) {
+          // แม่นมาก - ต้อง 5 เฟรม
+          requiredFrames = STABLE_STRICT;
+          statusIcon = '🟢';
+        } else if (distance < THRESHOLD_NORMAL) {
+          // ปานกลาง - ต้อง 9 เฟรม (รองรับแมส)
+          requiredFrames = STABLE_NORMAL;
+          statusIcon = '🟡';
+        } else {
+          // ไม่ผ่าน threshold - distance สูงเกินไป
+          stableCountRef.current = 0;
+          matchCountRef.current = 0;
+          lastMatchLabelRef.current = null;
+          setStatus(`⚠️ ใบหน้าไม่ชัดเจน [${distance.toFixed(2)}] - ขยับหน้าให้ตรง/ถอดแมส`);
+          logScanFail('LOW_CONFIDENCE', `ใบหน้าไม่ชัด (distance: ${distance.toFixed(3)})`, bestMatch.toString());
+          return;
+        }
+
         stableCountRef.current += 1;
 
-        if (stableCountRef.current < STABLE_REQUIRED) {
-          setStatus(`⏳ กำลังยืนยัน... (${stableCountRef.current}/${STABLE_REQUIRED}) [${distance.toFixed(2)}]`);
+        if (stableCountRef.current < requiredFrames) {
+          setStatus(`${statusIcon} กำลังยืนยัน... (${stableCountRef.current}/${requiredFrames}) [${distance.toFixed(2)}]`);
           return;
         }
 
@@ -332,7 +361,7 @@ export default function LoginPage() {
 
               {/* Face Frame (กรอบหน้า) */}
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                  <div className={`w-[220px] h-[300px] border-4 rounded-[50%] transition-colors duration-300 shadow-[0_0_100px_rgba(0,0,0,0.5)_inset]
+                <div className={`w-[220px] h-[300px] border-4 rounded-[50%] transition-colors duration-300 shadow-[0_0_100px_rgba(0,0,0,0.5)_inset]
                       ${status.includes('✅') ? 'border-green-400 shadow-[0_0_20px_rgba(74,222,128,0.5)]' : 'border-blue-400/70 border-dashed'}
                   `}></div>
               </div>
