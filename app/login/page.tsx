@@ -32,9 +32,9 @@ export default function LoginPage() {
   const lastFailReasonRef = useRef<string | null>(null);
   const lastFailAtRef = useRef(0);
 
-  const STABLE_REQUIRED = 6; // ~1.2s
+  const STABLE_REQUIRED = 9; // ~1.2s
   const DETECTOR_INPUT_SIZE = 192; // มือถือ 160-192
-  const DETECTOR_SCORE_THRESHOLD = 0.6;
+  const DETECTOR_SCORE_THRESHOLD = 0.4;
   const ZONE_W = 220;
   const ZONE_H = 300;
 
