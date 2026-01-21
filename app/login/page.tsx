@@ -155,8 +155,8 @@ export default function LoginPage() {
       matchedUserRef.current = user;
       const descriptor = new Float32Array(user.descriptor);
       const labeledDescriptor = new faceapi.LabeledFaceDescriptors(user.email, [descriptor]);
-      // Threshold กลาง ๆ เพื่อให้แมสยังพอได้ แต่ลด false positive
-      faceMatcherRef.current = new faceapi.FaceMatcher([labeledDescriptor], 0.55);
+      // Threshold เข้มงวดขึ้น (0.42) เพื่อลด false positive
+      faceMatcherRef.current = new faceapi.FaceMatcher([labeledDescriptor], 0.42);
       matchCountRef.current = 0;
       stableCountRef.current = 0;
       lastMatchLabelRef.current = null;
@@ -239,11 +239,17 @@ export default function LoginPage() {
       const matcher = faceMatcherRef.current;
       if (!matcher) return;
       const bestMatch = matcher.findBestMatch(detection.descriptor);
-      if (bestMatch.label !== 'unknown') {
+      const distance = bestMatch.distance;
+      const MAX_DISTANCE = 0.42; // เช็คซ้ำอีกชั้น
+
+      // Debug: แสดง distance ใน console
+      console.log(`Face match: ${bestMatch.label}, distance: ${distance.toFixed(3)}`);
+
+      if (bestMatch.label !== 'unknown' && distance <= MAX_DISTANCE) {
         stableCountRef.current += 1;
 
         if (stableCountRef.current < STABLE_REQUIRED) {
-          setStatus(`⏳ กำลังยืนยัน... (${stableCountRef.current}/${STABLE_REQUIRED})`);
+          setStatus(`⏳ กำลังยืนยัน... (${stableCountRef.current}/${STABLE_REQUIRED}) [${distance.toFixed(2)}]`);
           return;
         }
 
@@ -257,8 +263,8 @@ export default function LoginPage() {
         stableCountRef.current = 0;
         matchCountRef.current = 0;
         lastMatchLabelRef.current = null;
-        setStatus('❌ ใบหน้าไม่ตรงกับบัญชีนี้');
-        logScanFail('UNKNOWN_FACE', 'ใบหน้าไม่ตรงกับบัญชีนี้', bestMatch.toString());
+        setStatus(`❌ ใบหน้าไม่ตรงกับบัญชีนี้ [${distance.toFixed(2)}]`);
+        logScanFail('UNKNOWN_FACE', `ใบหน้าไม่ตรง (distance: ${distance.toFixed(3)})`, bestMatch.toString());
       }
     }, 200);
   };
