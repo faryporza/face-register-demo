@@ -7,6 +7,7 @@ import {
   detectHeadTurn,
   isFacingStraight,
 } from '@/lib/livenessDetection';
+import { loadFaceModels } from '@/lib/faceApi';
 
 type MatchedUser = {
   email?: string;
@@ -78,14 +79,9 @@ export default function LoginPage() {
   };
 
   useEffect(() => {
-    const loadModels = async () => {
-      const MODEL_URL = '/models';
+    const initModels = async () => {
       try {
-        await Promise.all([
-          faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
-          faceapi.nets.faceLandmark68TinyNet.loadFromUri(MODEL_URL),
-          faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL)
-        ]);
+        await loadFaceModels();
         setLoadingModel(false);
         setStatus('กรอกอีเมลและรหัสผ่าน');
       } catch (err) {
@@ -94,7 +90,7 @@ export default function LoginPage() {
       }
     };
 
-    loadModels();
+    initModels();
 
     return () => {
       stopDetection();
@@ -216,14 +212,13 @@ export default function LoginPage() {
     intervalRef.current = setInterval(async () => {
       if (video.paused || video.ended || video.readyState !== 4) return;
 
-      const options = new faceapi.TinyFaceDetectorOptions({
-        inputSize: DETECTOR_INPUT_SIZE,
-        scoreThreshold: DETECTOR_SCORE_THRESHOLD,
+      const options = new faceapi.SsdMobilenetv1Options({
+        minConfidence: DETECTOR_SCORE_THRESHOLD,
       });
 
       const detection = await faceapi
         .detectSingleFace(video, options)
-        .withFaceLandmarks(true)
+        .withFaceLandmarks()
         .withFaceDescriptor();
 
       const context = canvas.getContext('2d');

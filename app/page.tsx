@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
 import * as faceapi from 'face-api.js';
+import { loadFaceModels } from '@/lib/faceApi';
 
 export default function Home() {
   const [step, setStep] = useState(1); // 1: ฟอร์ม, 2: สแกน
@@ -65,15 +66,12 @@ export default function Home() {
   };
 
   // -------- Load models --------
+
+  // -------- Load models --------
   useEffect(() => {
-    const loadModels = async () => {
-      const MODEL_URL = '/models';
+    const initModels = async () => {
       try {
-        await Promise.all([
-          faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
-          faceapi.nets.faceLandmark68TinyNet.loadFromUri(MODEL_URL),
-          faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
-        ]);
+        await loadFaceModels();
         setLoadingModel(false);
       } catch (err) {
         console.error(err);
@@ -81,7 +79,7 @@ export default function Home() {
       }
     };
 
-    loadModels();
+    initModels();
 
     return () => {
       stopDetection();
@@ -178,12 +176,11 @@ export default function Home() {
         return cx > zoneX && cx < zoneX + ZONE_W && cy > zoneY && cy < zoneY + ZONE_H;
       };
 
-      const options = new faceapi.TinyFaceDetectorOptions({
-        inputSize: DETECTOR_INPUT_SIZE,
-        scoreThreshold: DETECTOR_SCORE_THRESHOLD,
+      const options = new faceapi.SsdMobilenetv1Options({
+        minConfidence: DETECTOR_SCORE_THRESHOLD,
       });
 
-      const detection = await faceapi.detectSingleFace(video, options).withFaceLandmarks(true);
+      const detection = await faceapi.detectSingleFace(video, options).withFaceLandmarks();
 
       const ctx = canvas.getContext('2d');
       ctx?.clearRect(0, 0, canvas.width, canvas.height);
@@ -305,15 +302,14 @@ export default function Home() {
         return cx > zoneX && cx < zoneX + ZONE_W && cy > zoneY && cy < zoneY + ZONE_H;
       };
 
-      const options = new faceapi.TinyFaceDetectorOptions({
-        inputSize: DETECTOR_INPUT_SIZE,
-        scoreThreshold: DETECTOR_SCORE_THRESHOLD,
+      const options = new faceapi.SsdMobilenetv1Options({
+        minConfidence: DETECTOR_SCORE_THRESHOLD,
       });
 
       // ตรวจซ้ำตอนบันทึกจริง (กันหลุด)
       const det = await faceapi
         .detectSingleFace(video, options)
-        .withFaceLandmarks(true)
+        .withFaceLandmarks()
         .withFaceDescriptor();
 
       if (!det) {
@@ -546,10 +542,9 @@ export default function Home() {
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                 <div
                   className={`w-[220px] h-[300px] border-4 rounded-[50%] transition-colors duration-300 shadow-[0_0_100px_rgba(0,0,0,0.5)_inset]
-                    ${
-                      subStep === 3
-                        ? 'border-green-400 shadow-[0_0_20px_rgba(74,222,128,0.5)]'
-                        : 'border-blue-400/70 border-dashed'
+                    ${subStep === 3
+                      ? 'border-green-400 shadow-[0_0_20px_rgba(74,222,128,0.5)]'
+                      : 'border-blue-400/70 border-dashed'
                     }`}
                 />
               </div>

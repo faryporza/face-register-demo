@@ -9,6 +9,7 @@ import {
   createInitialLivenessState,
   type LivenessState,
 } from '@/lib/livenessDetection';
+import { loadFaceModels } from '@/lib/faceApi';
 
 type FaceUser = {
   name: string;
@@ -81,13 +82,8 @@ export default function CheckIn() {
 
   useEffect(() => {
     const loadResources = async () => {
-      const MODEL_URL = '/models';
       try {
-        await Promise.all([
-          faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
-          faceapi.nets.faceLandmark68TinyNet.loadFromUri(MODEL_URL),
-          faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL)
-        ]);
+        await loadFaceModels();
 
         const response = await fetch('/api/faces');
         const users = (await response.json()) as FaceUser[];
@@ -199,8 +195,8 @@ export default function CheckIn() {
       faceapi.matchDimensions(canvasRef.current, displaySize);
 
       const detections = await faceapi
-        .detectAllFaces(videoRef.current, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 }))
-        .withFaceLandmarks(true)
+        .detectAllFaces(videoRef.current, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 }))
+        .withFaceLandmarks()
         .withFaceDescriptors();
 
       const resizedDetections = faceapi.resizeResults(detections, displaySize);
