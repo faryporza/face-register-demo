@@ -276,8 +276,9 @@ export default function LoginPage() {
             setStatus(`�️ กระพริบตาแล้ว ${newCount}/${REQUIRED_BLINKS} ครั้ง`);
           }
         } else {
-          const eyeStatus = currentEAR < 0.21 ? '(กำลังหลับตา...)' : '';
-          setStatus(`👁️ กรุณากระพริบตา ${blinkCount}/${REQUIRED_BLINKS} ${eyeStatus}`);
+          // แสดง EAR เพื่อ debug (< 0.25 = หลับตา)
+          const eyeStatus = currentEAR < 0.25 ? '✅ ตาหลับ!' : '';
+          setStatus(`👁️ กระพริบตา ${blinkCount}/${REQUIRED_BLINKS} | EAR: ${currentEAR.toFixed(2)} ${eyeStatus}`);
         }
         return;
       }

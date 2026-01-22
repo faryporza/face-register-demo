@@ -18,9 +18,9 @@ export type LivenessState = {
 };
 
 // ===== Constants =====
-const EAR_THRESHOLD = 0.21;        // ค่า EAR ที่ถือว่าหลับตา
-const EAR_CONSEC_FRAMES = 2;       // จำนวน frame ที่ต้องหลับตาติดต่อกัน
-const HEAD_TURN_THRESHOLD = 0.45; // ค่า ratio ที่ถือว่าหันซ้าย/ขวา
+const EAR_THRESHOLD = 0.25;        // ค่า EAR ที่ถือว่าหลับตา (ปรับจาก 0.21 เป็น 0.25 ให้ตรวจจับง่ายขึ้น)
+const EAR_CONSEC_FRAMES = 1;       // จำนวน frame ที่ต้องหลับตา (ปรับจาก 2 เป็น 1)
+const HEAD_TURN_THRESHOLD = 0.40; // ค่า ratio ที่ถือว่าหันซ้าย/ขวา (ปรับจาก 0.45)
 const MOTION_THRESHOLD = 5;       // pixel movement ขั้นต่ำ
 
 // ===== Eye Aspect Ratio (EAR) =====
