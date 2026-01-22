@@ -4,13 +4,8 @@ import * as faceapi from 'face-api.js';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
-  detectBlink,
   detectHeadTurn,
   isFacingStraight,
-  createInitialLivenessState,
-  getChallengeInstruction,
-  type LivenessState,
-  type ChallengeType,
 } from '@/lib/livenessDetection';
 
 type MatchedUser = {
@@ -19,8 +14,8 @@ type MatchedUser = {
   [key: string]: unknown;
 };
 
-// Liveness Steps: 0=blink, 1=turn, 2=face_verify, 3=completed
-type LivenessStep = 0 | 1 | 2 | 3;
+// Liveness Steps: 0=turn, 1=face_verify, 2=completed
+type LivenessStep = 0 | 1 | 2;
 
 export default function LoginPage() {
   const router = useRouter();
@@ -31,9 +26,8 @@ export default function LoginPage() {
 
   // Liveness Detection State
   const [livenessStep, setLivenessStep] = useState<LivenessStep>(0);
-  const [blinkCount, setBlinkCount] = useState(0);
+  const livenessStepRef = useRef<LivenessStep>(0); // ใช้ ref คู่กับ state เพื่อแก้ closure issue
   const [turnDirection, setTurnDirection] = useState<'left' | 'right'>('left');
-  const livenessStateRef = useRef<LivenessState>(createInitialLivenessState());
 
   // ค่ากำหนดสำหรับตรวจระยะ
   const MIN_FACE_WIDTH = 180;
@@ -61,9 +55,6 @@ export default function LoginPage() {
   const ZONE_W = 220;
   const ZONE_H = 300;
 
-  // Required blinks for liveness
-  const REQUIRED_BLINKS = 2;
-
   const stopDetection = () => {
     if (intervalRef.current) clearInterval(intervalRef.current);
   };
@@ -80,8 +71,7 @@ export default function LoginPage() {
 
   const resetLivenessState = () => {
     setLivenessStep(0);
-    setBlinkCount(0);
-    livenessStateRef.current = createInitialLivenessState();
+    livenessStepRef.current = 0;
     stableCountRef.current = 0;
     // สุ่มทิศทางหัน
     setTurnDirection(Math.random() > 0.5 ? 'left' : 'right');
@@ -195,7 +185,8 @@ export default function LoginPage() {
 
       resetLivenessState();
       setStep(2);
-      setStatus('👁️ กรุณากระพริบตา 2 ครั้ง');
+      const dirText = turnDirection === 'left' ? 'ซ้าย' : 'ขวา';
+      setStatus(`👆 กรุณาหันหน้าไปทาง${dirText}`);
       setTimeout(() => startVideo(), 100);
     } catch (err) {
       console.error(err);
@@ -260,47 +251,24 @@ export default function LoginPage() {
 
       const landmarks = detection.landmarks;
 
-      // ===== LIVENESS STEP 0: Blink Detection =====
-      if (livenessStep === 0) {
-        const { isBlink, currentEAR, newState } = detectBlink(landmarks, livenessStateRef.current);
-        livenessStateRef.current = newState;
-
-        if (isBlink) {
-          const newCount = blinkCount + 1;
-          setBlinkCount(newCount);
-
-          if (newCount >= REQUIRED_BLINKS) {
-            setLivenessStep(1);
-            setStatus(getChallengeInstruction(turnDirection === 'left' ? 'turn_left' : 'turn_right'));
-          } else {
-            setStatus(`�️ กระพริบตาแล้ว ${newCount}/${REQUIRED_BLINKS} ครั้ง`);
-          }
-        } else {
-          // แสดง EAR เพื่อ debug (< 0.25 = หลับตา)
-          const eyeStatus = currentEAR < 0.25 ? '✅ ตาหลับ!' : '';
-          setStatus(`👁️ กระพริบตา ${blinkCount}/${REQUIRED_BLINKS} | EAR: ${currentEAR.toFixed(2)} ${eyeStatus}`);
-        }
-        return;
-      }
-
-      // ===== LIVENESS STEP 1: Head Turn Detection =====
-      if (livenessStep === 1) {
+      // ===== LIVENESS STEP 0: Head Turn Detection =====
+      if (livenessStepRef.current === 0) {
         const isTurned = detectHeadTurn(landmarks, turnDirection);
+        const dirText = turnDirection === 'left' ? 'ซ้าย' : 'ขวา';
 
         if (isTurned) {
-          setLivenessStep(2);
+          livenessStepRef.current = 1;
+          setLivenessStep(1);
           stableCountRef.current = 0;
-          setStatus('✅ Liveness ผ่าน! กลับมามองตรงเพื่อยืนยันใบหน้า');
+          setStatus('✅ ดี! กรุณากลับมามองตรงเพื่อยืนยันใบหน้า');
         } else {
-          const dirText = turnDirection === 'left' ? 'ซ้าย' : 'ขวา';
-          setStatus(`👈 กรุณาหันหน้าไปทาง${dirText}`);
+          setStatus(`👆 กรุณาหันหน้าไปทาง${dirText}`);
         }
         return;
       }
 
-      // ===== LIVENESS STEP 2: Face Verification (ต้องหันกลับมาหน้าตรง) =====
-      if (livenessStep === 2) {
-        // ตรวจว่าหันกลับมาหน้าตรงหรือยัง
+      // ===== LIVENESS STEP 1: Face Verification (ต้องหันกลับมาหน้าตรง) =====
+      if (livenessStepRef.current === 1) {
         if (!isFacingStraight(landmarks)) {
           setStatus('🔵 กรุณากลับมามองหน้าตรง');
           stableCountRef.current = 0;
@@ -342,7 +310,8 @@ export default function LoginPage() {
           }
 
           // SUCCESS!
-          setLivenessStep(3);
+          livenessStepRef.current = 2;
+          setLivenessStep(2);
           setStatus('✅ ยืนยันตัวตนสำเร็จ!');
           logScanSuccess();
           stopDetection();
@@ -360,16 +329,13 @@ export default function LoginPage() {
 
   // Get border color based on liveness step
   const getBorderClass = () => {
-    if (livenessStep === 3 || status.includes('✅ ยืนยันตัวตนสำเร็จ')) {
+    if (livenessStep === 2 || status.includes('✅ ยืนยันตัวตนสำเร็จ')) {
       return 'border-green-400 shadow-[0_0_20px_rgba(74,222,128,0.5)]';
     }
-    if (livenessStep === 2) {
+    if (livenessStep === 1) {
       return 'border-blue-400 border-solid';
     }
-    if (livenessStep === 1) {
-      return 'border-yellow-400 border-dashed';
-    }
-    return 'border-purple-400/70 border-dashed'; // blink stage
+    return 'border-yellow-400 border-dashed'; // turn stage
   };
 
   return (
@@ -421,19 +387,15 @@ export default function LoginPage() {
           <div className="flex flex-col items-center gap-4">
             {/* Liveness Progress Indicator */}
             <div className="flex items-center gap-2 mb-2">
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${livenessStep >= 0 ? 'bg-purple-500 text-white' : 'bg-gray-300'}`}>
-                👁️
-              </div>
-              <div className={`w-8 h-1 ${livenessStep >= 1 ? 'bg-yellow-500' : 'bg-gray-300'}`}></div>
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${livenessStep >= 1 ? 'bg-yellow-500 text-white' : 'bg-gray-300'}`}>
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${livenessStep >= 0 ? 'bg-yellow-500 text-white' : 'bg-gray-300'}`}>
                 {turnDirection === 'left' ? '👈' : '👉'}
               </div>
-              <div className={`w-8 h-1 ${livenessStep >= 2 ? 'bg-blue-500' : 'bg-gray-300'}`}></div>
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${livenessStep >= 2 ? 'bg-blue-500 text-white' : 'bg-gray-300'}`}>
+              <div className={`w-8 h-1 ${livenessStep >= 1 ? 'bg-blue-500' : 'bg-gray-300'}`}></div>
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${livenessStep >= 1 ? 'bg-blue-500 text-white' : 'bg-gray-300'}`}>
                 🔵
               </div>
-              <div className={`w-8 h-1 ${livenessStep >= 3 ? 'bg-green-500' : 'bg-gray-300'}`}></div>
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${livenessStep >= 3 ? 'bg-green-500 text-white' : 'bg-gray-300'}`}>
+              <div className={`w-8 h-1 ${livenessStep >= 2 ? 'bg-green-500' : 'bg-gray-300'}`}></div>
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${livenessStep >= 2 ? 'bg-green-500 text-white' : 'bg-gray-300'}`}>
                 ✅
               </div>
             </div>

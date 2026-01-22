@@ -10,18 +10,23 @@ export type Point = { x: number; y: number };
 export type ChallengeType = 'blink' | 'turn_left' | 'turn_right' | 'nod';
 export type LivenessState = {
     blinkCount: number;
+    mouthOpenCount: number;
     lastEAR: number;
+    lastMAR: number;
     eyeClosedFrames: number;
+    mouthOpenFrames: number;
     lastHeadPose: { yaw: number; pitch: number };
     motionScore: number;
     challengeCompleted: boolean;
 };
 
 // ===== Constants =====
-const EAR_THRESHOLD = 0.25;        // ค่า EAR ที่ถือว่าหลับตา (ปรับจาก 0.21 เป็น 0.25 ให้ตรวจจับง่ายขึ้น)
-const EAR_CONSEC_FRAMES = 1;       // จำนวน frame ที่ต้องหลับตา (ปรับจาก 2 เป็น 1)
-const HEAD_TURN_THRESHOLD = 0.40; // ค่า ratio ที่ถือว่าหันซ้าย/ขวา (ปรับจาก 0.45)
-const MOTION_THRESHOLD = 5;       // pixel movement ขั้นต่ำ
+const EAR_THRESHOLD = 0.29;        // ค่า EAR ที่ถือว่าหลับตา
+const EAR_CONSEC_FRAMES = 1;       // จำนวน frame ที่ต้องหลับตา
+const MAR_THRESHOLD = 0.5;         // ค่า MAR ที่ถือว่าอ้าปาก
+const MAR_CONSEC_FRAMES = 1;       // จำนวน frame ที่ต้องอ้าปาก
+const HEAD_TURN_THRESHOLD = 0.40;  // ค่า ratio ที่ถือว่าหันซ้าย/ขวา
+const MOTION_THRESHOLD = 5;        // pixel movement ขั้นต่ำ
 
 // ===== Eye Aspect Ratio (EAR) =====
 /**
@@ -82,6 +87,66 @@ export function detectBlink(
 
     return { isBlink, currentEAR: avgEAR, newState };
 }
+
+// ===== Mouth Aspect Ratio (MAR) =====
+/**
+ * คำนวณ Mouth Aspect Ratio สำหรับตรวจจับการอ้าปาก
+ * MAR = (|p2-p8| + |p3-p7| + |p4-p6|) / (3 * |p1-p5|)
+ * 
+ * Mouth landmarks (inner lip in face-api.js):
+ * indices 60-67 for inner lip
+ */
+export function calculateMAR(mouth: Point[]): number {
+    // mouth array from getMouth() has 20 points
+    // Inner lip: indices 12-19 (60-67 in full 68 landmarks)
+    // We use outer lip for more reliable detection: indices 0-11
+
+    if (mouth.length < 12) return 0.1; // default closed
+
+    // ใช้จุดบน/ล่างของปาก (outer lip)
+    const topLip = mouth[3];     // กลางปากบน
+    const bottomLip = mouth[9];  // กลางปากล่าง
+    const leftCorner = mouth[0];  // มุมปากซ้าย
+    const rightCorner = mouth[6]; // มุมปากขวา
+
+    const vertical = distance(topLip, bottomLip);
+    const horizontal = distance(leftCorner, rightCorner);
+
+    if (horizontal === 0) return 0.1;
+
+    const mar = vertical / horizontal;
+    return mar;
+}
+
+/**
+ * ตรวจจับว่ากำลังอ้าปากหรือไม่
+ * คืนค่า true ถ้าเพิ่งอ้าปากเสร็จ (หุบ→อ้า→หุบ)
+ */
+export function detectMouthOpen(
+    landmarks: faceapi.FaceLandmarks68,
+    state: LivenessState
+): { isMouthOpen: boolean; currentMAR: number; newState: LivenessState } {
+    const mouth = landmarks.getMouth();
+    const mar = calculateMAR(mouth);
+
+    let isMouthOpen = false;
+    const newState = { ...state, lastMAR: mar };
+
+    // ตรวจว่าอ้าปาก
+    if (mar > MAR_THRESHOLD) {
+        newState.mouthOpenFrames += 1;
+    } else {
+        // ถ้าเพิ่งหุบปากหลังจากอ้าไปพอสมควร → นับเป็น 1 mouth open
+        if (state.mouthOpenFrames >= MAR_CONSEC_FRAMES) {
+            newState.mouthOpenCount += 1;
+            isMouthOpen = true;
+        }
+        newState.mouthOpenFrames = 0;
+    }
+
+    return { isMouthOpen, currentMAR: mar, newState };
+}
+
 
 // ===== Head Pose Detection =====
 /**
@@ -206,8 +271,11 @@ export function getChallengeInstruction(challenge: ChallengeType): string {
 export function createInitialLivenessState(): LivenessState {
     return {
         blinkCount: 0,
+        mouthOpenCount: 0,
         lastEAR: 0.3,
+        lastMAR: 0.1,
         eyeClosedFrames: 0,
+        mouthOpenFrames: 0,
         lastHeadPose: { yaw: 0, pitch: 0 },
         motionScore: 0,
         challengeCompleted: false,
