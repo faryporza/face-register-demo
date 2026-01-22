@@ -180,6 +180,15 @@ export default function LoginPage() {
       }
 
       const user = result.user;
+
+      // Check for Face Data
+      if (!user.descriptor || user.descriptor.length === 0) {
+        localStorage.setItem('currentUser', JSON.stringify(user));
+        alert('บัญชีนี้ยังไม่ได้บันทึกใบหน้า กรุณาบันทึกใบหน้าใหม่');
+        router.push('/face-setup');
+        return;
+      }
+
       matchedUserRef.current = user;
       const descriptor = new Float32Array(user.descriptor);
       const labeledDescriptor = new faceapi.LabeledFaceDescriptors(user.email, [descriptor]);

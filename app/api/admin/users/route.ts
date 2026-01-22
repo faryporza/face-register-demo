@@ -32,7 +32,8 @@ export async function GET(req: Request) {
         .toArray();
       const normalized = users.map((user: Record<string, unknown>) => ({
         ...user,
-        _id: user._id?.toString?.() || user._id
+        _id: user._id?.toString?.() || user._id,
+        hasFace: !!(user.descriptor && Array.isArray(user.descriptor) && user.descriptor.length > 0)
       }));
 
       return NextResponse.json({
@@ -49,7 +50,8 @@ export async function GET(req: Request) {
     const users = await facesCollection.find({}, { projection: { password: 0 } }).toArray();
     const normalized = users.map((user: Record<string, unknown>) => ({
       ...user,
-      _id: user._id?.toString?.() || user._id
+      _id: user._id?.toString?.() || user._id,
+      hasFace: !!(user.descriptor && Array.isArray(user.descriptor) && user.descriptor.length > 0)
     }));
 
     return NextResponse.json(normalized);
@@ -63,13 +65,6 @@ export async function PATCH(req: Request) {
   try {
     const text = await req.text();
     if (!text) {
-      await writeAuditLog(req, {
-        event: 'admin-action',
-        status: 'fail',
-        errorCode: 'EMPTY_BODY',
-        message: 'Request body is empty',
-        email: getRequesterEmail(req)
-      });
       return NextResponse.json({ success: false, message: 'Request body is empty' }, { status: 400 });
     }
 
@@ -77,25 +72,36 @@ export async function PATCH(req: Request) {
     try {
       body = JSON.parse(text);
     } catch {
-      await writeAuditLog(req, {
-        event: 'admin-action',
-        status: 'fail',
-        errorCode: 'INVALID_JSON',
-        message: 'Invalid JSON',
-        email: getRequesterEmail(req)
-      });
       return NextResponse.json({ success: false, message: 'Invalid JSON' }, { status: 400 });
     }
 
-    const { id, type } = body;
-    if (!id || !type || !['admin', 'user'].includes(type)) {
+    const { id, type, action } = body;
+
+    // Logic for remove_face
+    if (action === 'remove_face') {
+      if (!id) return NextResponse.json({ success: false, message: 'Missing ID' }, { status: 400 });
+
+      const client = await getMongoClient();
+      const db = client.db();
+      const facesCollection = db.collection('faces');
+
+      await facesCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $unset: { descriptor: "" } }
+      );
+
       await writeAuditLog(req, {
         event: 'admin-action',
-        status: 'fail',
-        errorCode: 'INVALID_PAYLOAD',
-        message: 'Invalid payload',
-        email: getRequesterEmail(req)
+        status: 'success',
+        email: getRequesterEmail(req),
+        result: { action: 'remove_face' },
+        meta: { userId: id }
       });
+      return NextResponse.json({ success: true });
+    }
+
+    // Logic for Type update
+    if (!id || !type || !['admin', 'user'].includes(type)) {
       return NextResponse.json({ success: false, message: 'Invalid payload' }, { status: 400 });
     }
 
@@ -119,16 +125,11 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('Error updating user:', error);
-    await writeAuditLog(req, {
-      event: 'admin-action',
-      status: 'fail',
-      errorCode: 'SERVER_ERROR',
-      message: 'Failed to update user',
-      email: getRequesterEmail(req)
-    });
     return NextResponse.json({ success: false, message: 'Failed to update user' }, { status: 500 });
   }
 }
+
+
 
 export async function DELETE(req: Request) {
   try {

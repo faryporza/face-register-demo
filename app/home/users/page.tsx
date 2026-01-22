@@ -13,6 +13,7 @@ type UserItem = {
   phone?: string;
   type?: 'admin' | 'user' | string;
   timestamp?: string;
+  hasFace?: boolean;
 };
 
 export default function UsersPage() {
@@ -114,6 +115,31 @@ export default function UsersPage() {
     }
   };
 
+  const deleteFaceData = async (id: string) => {
+    if (!confirm('ต้องการลบข้อมูลใบหน้าของผู้ใช้นี้หรือไม่? (ผู้ใช้จะต้องลงทะเบียนใบหน้าใหม่)')) return;
+
+    try {
+      setUpdatingId(id);
+      const response = await fetch('/api/admin/users', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, action: 'remove_face' })
+      });
+
+      const result = await response.json();
+      if (!result.success) {
+        setError(result.message || 'ไม่สามารถลบข้อมูลใบหน้าได้');
+        return;
+      }
+
+      setUsers((prev) => prev.map((user) => (user._id === id ? { ...user, hasFace: false } : user)));
+    } catch (err) {
+      setError('ไม่สามารถลบข้อมูลใบหน้าได้');
+    } finally {
+      setUpdatingId(null);
+    }
+  };
+
   if (!currentUser) return <div className="flex items-center justify-center min-h-screen text-gray-500">กำลังโหลด...</div>;
 
   return (
@@ -137,6 +163,7 @@ export default function UsersPage() {
                   <th className="px-6 py-4">อีเมล</th>
                   <th className="px-6 py-4">เบอร์โทรศัพท์</th>
                   <th className="px-6 py-4">สิทธิ์</th>
+                  <th className="px-6 py-4">ข้อมูลใบหน้า</th>
                   <th className="px-6 py-4">การจัดการ</th>
                 </tr>
               </thead>
@@ -165,6 +192,26 @@ export default function UsersPage() {
                           <option value="user">user</option>
                           <option value="admin">admin</option>
                         </select>
+                      </td>
+                      <td className="px-6 py-4">
+                        {user.hasFace ? (
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full font-medium">
+                              ✅ บันทึกแล้ว
+                            </span>
+                            <button
+                              onClick={() => deleteFaceData(user._id)}
+                              disabled={updatingId === user._id}
+                              className="text-xs text-red-500 hover:underline disabled:text-gray-300"
+                            >
+                              ลบใบหน้า
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-xs bg-gray-100 text-gray-500 px-2 py-1 rounded-full font-medium">
+                            ❌ ไม่มีข้อมูล
+                          </span>
+                        )}
                       </td>
                       <td className="px-6 py-4">
                         <button
@@ -202,6 +249,6 @@ export default function UsersPage() {
           </div>
         </div>
       </div>
-    </HomeShell>
+    </HomeShell >
   );
 }
