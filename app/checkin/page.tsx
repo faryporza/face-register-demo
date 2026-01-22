@@ -52,12 +52,12 @@ export default function CheckIn() {
 
   // ค่ากำหนดสำหรับโซนและการตรวจจับ
   const ZONE_SIZE = 300;
-  const MIN_FACE_WIDTH = 180;
+
 
   // === Adaptive Threshold (รองรับแมสก์) ===
-  const THRESHOLD_STRICT = 0.35;
-  const THRESHOLD_NORMAL = 0.48;
-  const THRESHOLD_MASK = 0.55;
+  const THRESHOLD_STRICT = 0.42;
+  const THRESHOLD_NORMAL = 0.52;
+  const THRESHOLD_MASK = 0.60;
 
   const STABLE_FRAMES_STRICT = 3;
   const STABLE_FRAMES_NORMAL = 6;
@@ -69,7 +69,13 @@ export default function CheckIn() {
 
   const startVideo = () => {
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-      navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } })
+      navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: 'user',
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        }
+      })
         .then(stream => {
           if (videoRef.current) videoRef.current.srcObject = stream;
         })
@@ -99,7 +105,7 @@ export default function CheckIn() {
           return new faceapi.LabeledFaceDescriptors(`${user.name} ${user.surname}`, [descriptor]);
         });
 
-        faceMatcherRef.current = new faceapi.FaceMatcher(labeledDescriptors, 0.58);
+        faceMatcherRef.current = new faceapi.FaceMatcher(labeledDescriptors, 1.0);
 
         setStatus('พร้อมใช้งาน (ยืนยันตัวตนด้วยใบหน้า)');
         startVideo();
@@ -231,7 +237,8 @@ export default function CheckIn() {
         const isInZone = faceCenterX > zoneX && faceCenterX < zoneX + ZONE_SIZE &&
           faceCenterY > zoneY && faceCenterY < zoneY + ZONE_SIZE;
 
-        const isCloseEnough = box.width >= MIN_FACE_WIDTH;
+        const minFaceWidth = displaySize.width * 0.22; // 22% of video width
+        const isCloseEnough = box.width >= minFaceWidth;
 
         if (isInZone && isCloseEnough) {
           foundValidFace = true;
@@ -390,7 +397,7 @@ export default function CheckIn() {
         logScanFail(failReason, failMessage, failBestMatch);
       }
 
-    }, 150);
+    }, 250);
   };
 
   return (

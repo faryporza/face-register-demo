@@ -31,7 +31,7 @@ export default function LoginPage() {
   const [turnDirection, setTurnDirection] = useState<'left' | 'right'>('left');
 
   // ค่ากำหนดสำหรับตรวจระยะ
-  const MIN_FACE_WIDTH = 180;
+
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -44,12 +44,12 @@ export default function LoginPage() {
   const lastFailAtRef = useRef(0);
 
   // Thresholds สำหรับ Face Match
-  const THRESHOLD_STRICT = 0.38;
-  const THRESHOLD_NORMAL = 0.48;
-  const THRESHOLD_MASK = 0.55;
+  const THRESHOLD_STRICT = 0.42;
+  const THRESHOLD_NORMAL = 0.52;
+  const THRESHOLD_MASK = 0.60;
   const STABLE_STRICT = 4;
   const STABLE_NORMAL = 8;
-  const STABLE_MASK = 15;
+  const STABLE_MASK = 12;
 
   const DETECTOR_INPUT_SIZE = 192;
   const DETECTOR_SCORE_THRESHOLD = 0.4;
@@ -101,7 +101,13 @@ export default function LoginPage() {
   const startVideo = () => {
     setStatus('กำลังเปิดกล้อง...');
     navigator.mediaDevices
-      .getUserMedia({ video: { width: 640, height: 480 } })
+      .getUserMedia({
+        video: {
+          facingMode: 'user',
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        }
+      })
       .then((stream) => {
         streamRef.current = stream;
         if (videoRef.current) {
@@ -177,7 +183,7 @@ export default function LoginPage() {
       matchedUserRef.current = user;
       const descriptor = new Float32Array(user.descriptor);
       const labeledDescriptor = new faceapi.LabeledFaceDescriptors(user.email, [descriptor]);
-      faceMatcherRef.current = new faceapi.FaceMatcher([labeledDescriptor], 0.58);
+      faceMatcherRef.current = new faceapi.FaceMatcher([labeledDescriptor], 1.0);
 
       resetLivenessState();
       setStep(2);
@@ -230,7 +236,8 @@ export default function LoginPage() {
       }
 
       const box = detection.detection.box;
-      const isCloseEnough = box.width >= MIN_FACE_WIDTH;
+      const minFaceWidth = displaySize.width * 0.22; // 22% of video width
+      const isCloseEnough = box.width >= minFaceWidth;
       if (!isCloseEnough) {
         setStatus('🟠 กรุณาขยับหน้าเข้ามาใกล้กล้อง');
         return;
@@ -319,7 +326,7 @@ export default function LoginPage() {
           logScanFail('UNKNOWN_FACE', `ใบหน้าไม่ตรง (distance: ${distance.toFixed(3)})`, bestMatch.toString());
         }
       }
-    }, 150);
+    }, 250);
   };
 
   // Get border color based on liveness step
