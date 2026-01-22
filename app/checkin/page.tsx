@@ -2,6 +2,13 @@
 import { useState, useEffect, useRef } from 'react';
 import * as faceapi from 'face-api.js';
 import Link from 'next/link';
+import {
+  detectBlink,
+  detectMotion,
+  hasNaturalMovement,
+  createInitialLivenessState,
+  type LivenessState,
+} from '@/lib/livenessDetection';
 
 type FaceUser = {
   name: string;
@@ -14,12 +21,17 @@ type FaceTracker = {
   label: string;
   stableCount: number;
   lastDistance: number;
+  livenessState: LivenessState;
+  motionHistory: number[];
+  blinkDetected: boolean;
+  lastLandmarks: faceapi.FaceLandmarks68 | null;
 };
 
 export default function CheckIn() {
   const [status, setStatus] = useState('กำลังโหลดระบบ...');
   const [distanceStatus, setDistanceStatus] = useState<string>('');
   const [lastCheckIn, setLastCheckIn] = useState<string | null>(null);
+  const [livenessInfo, setLivenessInfo] = useState<string>('');
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -27,7 +39,7 @@ export default function CheckIn() {
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const usersRef = useRef<FaceUser[]>([]);
 
-  // Face trackers สำหรับ multi-face matching
+  // Face trackers สำหรับ multi-face matching + liveness
   const faceTrackersRef = useRef<Map<string, FaceTracker>>(new Map());
 
   // ตัวแปรกันบันทึกซ้ำ (Cooldown)
@@ -35,25 +47,24 @@ export default function CheckIn() {
   const lastLoggedNameRef = useRef<string | null>(null);
   const lastFailReasonRef = useRef<string | null>(null);
   const lastFailAtRef = useRef(0);
-  const recentCheckInsRef = useRef<Set<string>>(new Set()); // กัน check-in ซ้ำในช่วงสั้น
+  const recentCheckInsRef = useRef<Set<string>>(new Set());
 
   // ค่ากำหนดสำหรับโซนและการตรวจจับ
-  const ZONE_SIZE = 300; // ขนาดของกรอบสี่เหลี่ยมเป้าหมาย
-  const MIN_FACE_WIDTH = 180; // ขนาดใบหน้าขั้นต่ำ (ยิ่งมากยิ่งต้องใกล้)
+  const ZONE_SIZE = 300;
+  const MIN_FACE_WIDTH = 180;
 
-  // === Adaptive Threshold สำหรับความแม่นยำ (รองรับแมสก์) ===
-  // STRICT: ผ่านเร็ว (มั่นใจมาก)
-  // NORMAL: ต้องยืนยันหลายเฟรม
-  // MASK: สวมแมส ต้องยืนยันนานมาก
-  // REJECT: ไม่ผ่าน
-  const THRESHOLD_STRICT = 0.35;  // ถ้า distance < นี้ = แม่นมาก ผ่านเร็ว
-  const THRESHOLD_NORMAL = 0.48;  // ถ้า distance < นี้ = ต้องยืนยัน N เฟรม
-  const THRESHOLD_MASK = 0.55;    // ถ้า distance < นี้ = สวมแมส ต้องยืนยันหลายเฟรมมาก
-  // ถ้า distance >= THRESHOLD_MASK = ไม่ผ่าน
+  // === Adaptive Threshold (รองรับแมสก์) ===
+  const THRESHOLD_STRICT = 0.35;
+  const THRESHOLD_NORMAL = 0.48;
+  const THRESHOLD_MASK = 0.55;
 
-  const STABLE_FRAMES_STRICT = 3;   // เฟรมที่ต้องติดต่อกัน (distance < 0.35)
-  const STABLE_FRAMES_NORMAL = 6;   // เฟรมที่ต้องติดต่อกัน (distance < 0.48)
-  const STABLE_FRAMES_MASK = 12;    // เฟรมที่ต้องติดต่อกัน (distance < 0.55) - ยืนยันนานเพื่อความแม่น
+  const STABLE_FRAMES_STRICT = 3;
+  const STABLE_FRAMES_NORMAL = 6;
+  const STABLE_FRAMES_MASK = 12;
+
+  // Liveness requirements
+  const REQUIRED_BLINKS = 1; // ต้องกระพริบอย่างน้อย 1 ครั้ง
+  const MOTION_HISTORY_SIZE = 10; // เก็บ motion 10 frame ล่าสุด
 
   const startVideo = () => {
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
@@ -68,7 +79,6 @@ export default function CheckIn() {
     }
   };
 
-  // 1. โหลด Model และ ข้อมูลใบหน้า
   useEffect(() => {
     const loadResources = async () => {
       const MODEL_URL = '/models';
@@ -79,7 +89,6 @@ export default function CheckIn() {
           faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL)
         ]);
 
-        // ดึงข้อมูลคนจาก API
         const response = await fetch('/api/faces');
         const users = (await response.json()) as FaceUser[];
         usersRef.current = users;
@@ -89,16 +98,14 @@ export default function CheckIn() {
           return;
         }
 
-        // แปลงข้อมูลเป็น LabeledFaceDescriptors
         const labeledDescriptors = users.map((user) => {
           const descriptor = new Float32Array(user.descriptor);
           return new faceapi.LabeledFaceDescriptors(`${user.name} ${user.surname}`, [descriptor]);
         });
 
-        // สร้าง Matcher (Threshold 0.58 รองรับแมส แต่ใช้ Adaptive Check ภายหลังเพื่อกันผิดคน)
         faceMatcherRef.current = new faceapi.FaceMatcher(labeledDescriptors, 0.58);
 
-        setStatus('พร้อมใช้งาน (เข้าสู่ระบบด้วยใบหน้า)');
+        setStatus('พร้อมใช้งาน (ยืนยันตัวตนด้วยใบหน้า)');
         startVideo();
 
       } catch (err) {
@@ -113,22 +120,24 @@ export default function CheckIn() {
     };
   }, []);
 
-  // 2. ฟังก์ชันบันทึก Log และ Login
   const logCheckIn = async (fullName: string) => {
-    // ถ้าเพิ่งบันทึกคนนี้ไปเมื่อกี้ ไม่ต้องบันทึกซ้ำ
     if (lastLoggedNameRef.current === fullName || isProcessingRef.current) return;
 
-    isProcessingRef.current = true; // ล็อค
+    isProcessingRef.current = true;
     try {
       const parts = fullName.split(' ');
       const name = parts[0];
-      const surname = parts.slice(1).join(' '); // กรณีมีนามสกุลหลายคำ
+      const surname = parts.slice(1).join(' ');
 
-      // ส่ง API บันทึก Log
       const response = await fetch('/api/log', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, surname, status: 'CHECK_IN' })
+        body: JSON.stringify({
+          name,
+          surname,
+          status: 'CHECK_IN',
+          livenessVerified: true
+        })
       });
 
       const result = await response.json();
@@ -137,14 +146,11 @@ export default function CheckIn() {
         setStatus(`คุณ ${name} บันทึกไปแล้วเมื่อครู่ (Cooldown 30 นาที)`);
       } else {
         setLastCheckIn(fullName);
-
-        // บันทึก Check-in เท่านั้น
-        setStatus('บันทึกเวลาสำเร็จ!');
+        setStatus('✅ บันทึกเวลาสำเร็จ! (Liveness ผ่าน)');
       }
 
       lastLoggedNameRef.current = fullName;
 
-      // Cooldown 5 วินาทีถึงจะตรวจคนเดิมซ้ำได้ (ถ้าไม่ redirect)
       setTimeout(() => {
         isProcessingRef.current = false;
         lastLoggedNameRef.current = null;
@@ -179,11 +185,9 @@ export default function CheckIn() {
     }
   };
 
-  // 3. Loop ตรวจจับ (ปรับปรุงใหม่ - Adaptive Threshold + Stable Matching)
   const handleVideoPlay = () => {
     if (intervalRef.current) clearInterval(intervalRef.current);
 
-    // Reset face trackers
     faceTrackersRef.current.clear();
 
     intervalRef.current = setInterval(async () => {
@@ -205,7 +209,7 @@ export default function CheckIn() {
       const context = canvasRef.current.getContext('2d');
       context?.clearRect(0, 0, displaySize.width, displaySize.height);
 
-      // วาดกรอบเป้าหมาย (Zone) ตรงกลาง
+      // วาดกรอบเป้าหมาย
       const zoneX = (displaySize.width - ZONE_SIZE) / 2;
       const zoneY = (displaySize.height - ZONE_SIZE) / 2;
       context!.strokeStyle = 'rgba(255, 255, 255, 0.5)';
@@ -219,21 +223,18 @@ export default function CheckIn() {
       let failMessage = '';
       let failBestMatch: string | undefined;
 
-      // เก็บ labels ที่เจอในเฟรมนี้ เพื่อลบ stale trackers
       const labelsInThisFrame = new Set<string>();
 
       resizedDetections.forEach(result => {
         if (!canvasRef.current) return;
-        const { descriptor } = result;
+        const { descriptor, landmarks } = result;
         const box = result.detection.box;
 
-        // 1. ตรวจสอบว่าอยู่ตรงกลางโซนหรือไม่
         const faceCenterX = box.x + box.width / 2;
         const faceCenterY = box.y + box.height / 2;
         const isInZone = faceCenterX > zoneX && faceCenterX < zoneX + ZONE_SIZE &&
           faceCenterY > zoneY && faceCenterY < zoneY + ZONE_SIZE;
 
-        // 2. ตรวจสอบระยะ (ความกว้างของใบหน้า)
         const isCloseEnough = box.width >= MIN_FACE_WIDTH;
 
         if (isInZone && isCloseEnough) {
@@ -242,10 +243,8 @@ export default function CheckIn() {
           const distance = bestMatch.distance;
           const label = bestMatch.label;
 
-          // DEBUG: แสดง distance
           console.log(`[CHECK-IN] ${label}: distance=${distance.toFixed(3)}`);
 
-          // === Adaptive Threshold Logic ===
           let boxColor = 'red';
           let matchStatus = '';
 
@@ -255,62 +254,93 @@ export default function CheckIn() {
             // ดึง tracker หรือสร้างใหม่
             let tracker = faceTrackersRef.current.get(label);
             if (!tracker) {
-              tracker = { label, stableCount: 0, lastDistance: distance };
+              tracker = {
+                label,
+                stableCount: 0,
+                lastDistance: distance,
+                livenessState: createInitialLivenessState(),
+                motionHistory: [],
+                blinkDetected: false,
+                lastLandmarks: null,
+              };
               faceTrackersRef.current.set(label, tracker);
             }
+
+            // === PASSIVE LIVENESS: Blink Detection ===
+            const { isBlink, newState } = detectBlink(landmarks, tracker.livenessState);
+            tracker.livenessState = newState;
+            if (isBlink) {
+              tracker.blinkDetected = true;
+            }
+
+            // === PASSIVE LIVENESS: Motion Detection ===
+            if (tracker.lastLandmarks) {
+              const motion = detectMotion(landmarks, tracker.lastLandmarks);
+              tracker.motionHistory.push(motion);
+              if (tracker.motionHistory.length > MOTION_HISTORY_SIZE) {
+                tracker.motionHistory.shift();
+              }
+            }
+            tracker.lastLandmarks = landmarks;
+
+            // Check liveness status
+            const hasMotion = hasNaturalMovement(tracker.motionHistory);
+            const hasBlink = tracker.blinkDetected;
+            const livenessOk = hasBlink || (hasMotion && tracker.motionHistory.length >= MOTION_HISTORY_SIZE);
+
+            // สร้าง liveness info
+            const blinkIcon = hasBlink ? '✅' : '⏳';
+            const motionIcon = hasMotion ? '✅' : '⏳';
+            setLivenessInfo(`กระพริบตา: ${blinkIcon} | เคลื่อนไหว: ${motionIcon}`);
 
             // กำหนดจำนวนเฟรมที่ต้องการตาม distance
             let requiredFrames: number;
             if (distance < THRESHOLD_STRICT) {
-              // แม่นมาก - ต้อง 3 เฟรม
               requiredFrames = STABLE_FRAMES_STRICT;
               boxColor = '#00ff00';
             } else if (distance < THRESHOLD_NORMAL) {
-              // ปานกลาง - ต้อง 6 เฟรม
               requiredFrames = STABLE_FRAMES_NORMAL;
-              boxColor = '#ffff00'; // เหลือง = กำลังยืนยัน
+              boxColor = '#ffff00';
             } else if (distance < THRESHOLD_MASK) {
-              // สวมแมส - ต้อง 12 เฟรม (ยืนยันนานเพื่อความแม่นยำ)
               requiredFrames = STABLE_FRAMES_MASK;
-              boxColor = '#ffa500'; // ส้ม = ต้องยืนยันนานขึ้น
+              boxColor = '#ffa500';
             } else {
-              // ไม่ผ่าน threshold
-              requiredFrames = 999; // ไม่มีทางผ่าน
+              requiredFrames = 999;
               boxColor = 'red';
               matchStatus = `❌ ${label} (${distance.toFixed(2)}) - ไม่ตรง`;
             }
 
-            // เพิ่ม stable count ถ้าผ่าน threshold
             if (distance < THRESHOLD_MASK) {
-              tracker.stableCount += 1;
-              tracker.lastDistance = distance;
-
-              if (tracker.stableCount >= requiredFrames) {
-                // ผ่านแล้ว! ตรวจสอบว่ายังไม่เคย check-in ล่าสุด
-                if (!recentCheckInsRef.current.has(label) && !isProcessingRef.current) {
-                  recentCheckInsRef.current.add(label);
-                  logCheckIn(label);
-
-                  // ลบออกจาก recent หลัง 10 วินาที (กัน check-in ซ้ำเร็วเกินไป)
-                  setTimeout(() => {
-                    recentCheckInsRef.current.delete(label);
-                  }, 10000);
-                }
-
-                boxColor = '#00ff00';
-                matchStatus = `✅ ${label} (${distance.toFixed(2)})`;
-                currentStatus = 'ระยะเหมาะสม';
+              // ต้องผ่าน liveness ด้วย
+              if (!livenessOk) {
+                matchStatus = `⏳ ${label} - รอยืนยันตัวตน (กระพริบตา/ขยับ)`;
+                boxColor = '#9966ff'; // ม่วง = รอ liveness
               } else {
-                // กำลังยืนยัน
-                matchStatus = `⏳ ${label} (${tracker.stableCount}/${requiredFrames})`;
-                currentStatus = `กำลังยืนยัน... ${tracker.stableCount}/${requiredFrames}`;
+                tracker.stableCount += 1;
+                tracker.lastDistance = distance;
+
+                if (tracker.stableCount >= requiredFrames) {
+                  if (!recentCheckInsRef.current.has(label) && !isProcessingRef.current) {
+                    recentCheckInsRef.current.add(label);
+                    logCheckIn(label);
+
+                    setTimeout(() => {
+                      recentCheckInsRef.current.delete(label);
+                    }, 10000);
+                  }
+
+                  boxColor = '#00ff00';
+                  matchStatus = `✅ ${label} (Liveness ผ่าน!)`;
+                  currentStatus = 'ยืนยันตัวตนสำเร็จ';
+                } else {
+                  matchStatus = `⏳ ${label} (${tracker.stableCount}/${requiredFrames})`;
+                  currentStatus = `กำลังยืนยัน... ${tracker.stableCount}/${requiredFrames}`;
+                }
               }
             } else {
-              // Reset ถ้า distance สูงเกินไป
               tracker.stableCount = 0;
             }
           } else {
-            // Unknown face
             matchStatus = `❌ ไม่รู้จัก (${distance.toFixed(2)})`;
             currentStatus = 'ไม่พบใบหน้าที่ตรงกับฐานข้อมูล';
             failReason = 'UNKNOWN_FACE';
@@ -328,7 +358,6 @@ export default function CheckIn() {
           currentStatus = 'กรุณาขยับหน้าเข้ามาใกล้กล้องอีก';
           failReason = 'TOO_FAR';
           failMessage = currentStatus;
-          // วาดกรอบสีเหลืองเตือนว่าไกลไป
           context!.strokeStyle = 'yellow';
           context!.strokeRect(box.x, box.y, box.width, box.height);
         } else if (!isInZone) {
@@ -338,10 +367,9 @@ export default function CheckIn() {
         }
       });
 
-      // ลบ trackers ที่หายไปจากเฟรม (หน้าหายไป)
+      // ลบ trackers ที่หายไปจากเฟรม
       for (const [label] of faceTrackersRef.current) {
         if (!labelsInThisFrame.has(label)) {
-          // ลดลงทีละครึ่ง แทนที่จะลบทันที (กันกระพริบ)
           const tracker = faceTrackersRef.current.get(label);
           if (tracker) {
             tracker.stableCount = Math.floor(tracker.stableCount / 2);
@@ -356,8 +384,8 @@ export default function CheckIn() {
         currentStatus = "";
         failReason = 'NO_FACE';
         failMessage = 'ไม่พบใบหน้า (ขยับเข้ามาในกรอบ)';
-        // Reset all trackers when no face detected
         faceTrackersRef.current.clear();
+        setLivenessInfo('');
       }
 
       setDistanceStatus(currentStatus);
@@ -366,12 +394,12 @@ export default function CheckIn() {
         logScanFail(failReason, failMessage, failBestMatch);
       }
 
-    }, 200); // ตรวจทุก 200ms
+    }, 150);
   };
 
   return (
     <div className="flex flex-col items-center min-h-screen bg-gray-100 text-white p-4">
-      <h1 className="text-3xl font-bold mb-4 text-cyan-400">ระบบลงเวลา (รองรับ Mask)</h1>
+      <h1 className="text-3xl font-bold mb-4 text-cyan-400">ระบบลงเวลา (Liveness Detection)</h1>
 
       <div className="relative border-4 border-slate-700 rounded-lg overflow-hidden shadow-2xl bg-black">
         <video
@@ -382,7 +410,7 @@ export default function CheckIn() {
           onPlay={handleVideoPlay}
           width="640"
           height="480"
-          className="scale-x-[-1]" // กลับด้านเหมือนกระจก
+          className="scale-x-[-1]"
         />
         <canvas
           ref={canvasRef}
@@ -393,8 +421,14 @@ export default function CheckIn() {
       <div className="mt-6 flex flex-col items-center gap-2">
         <p className="text-lg text-gray-300">{status}</p>
 
+        {livenessInfo && (
+          <p className="text-sm text-purple-400 font-medium bg-purple-900/30 px-4 py-2 rounded-full">
+            🔐 Liveness: {livenessInfo}
+          </p>
+        )}
+
         {distanceStatus && (
-          <p className={`text-xl font-bold animat-pulse ${distanceStatus === 'ระยะเหมาะสม' ? 'text-green-400' : 'text-yellow-400'}`}>
+          <p className={`text-xl font-bold animate-pulse ${distanceStatus === 'ยืนยันตัวตนสำเร็จ' ? 'text-green-400' : 'text-yellow-400'}`}>
             {distanceStatus}
           </p>
         )}
@@ -409,6 +443,9 @@ export default function CheckIn() {
       <div className="mt-8 flex gap-4">
         <Link href="/" className="text-gray-400 hover:text-white underline text-sm transition-colors">
           ไปหน้าลงทะเบียน
+        </Link>
+        <Link href="/login" className="text-gray-400 hover:text-white underline text-sm transition-colors">
+          ไปหน้าเข้าสู่ระบบ
         </Link>
       </div>
     </div>

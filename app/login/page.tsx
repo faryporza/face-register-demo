@@ -3,6 +3,15 @@ import { useEffect, useRef, useState } from 'react';
 import * as faceapi from 'face-api.js';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import {
+  detectBlink,
+  detectHeadTurn,
+  isFacingStraight,
+  createInitialLivenessState,
+  getChallengeInstruction,
+  type LivenessState,
+  type ChallengeType,
+} from '@/lib/livenessDetection';
 
 type MatchedUser = {
   email?: string;
@@ -10,42 +19,50 @@ type MatchedUser = {
   [key: string]: unknown;
 };
 
+// Liveness Steps: 0=blink, 1=turn, 2=face_verify, 3=completed
+type LivenessStep = 0 | 1 | 2 | 3;
+
 export default function LoginPage() {
   const router = useRouter();
-  const [step, setStep] = useState(1); // 1: email/password, 2: face verify
+  const [step, setStep] = useState(1); // 1: email/password, 2: liveness + face verify
   const [formData, setFormData] = useState({ email: '', password: '' });
   const [status, setStatus] = useState('กำลังโหลดระบบ...');
   const [loadingModel, setLoadingModel] = useState(true);
 
+  // Liveness Detection State
+  const [livenessStep, setLivenessStep] = useState<LivenessStep>(0);
+  const [blinkCount, setBlinkCount] = useState(0);
+  const [turnDirection, setTurnDirection] = useState<'left' | 'right'>('left');
+  const livenessStateRef = useRef<LivenessState>(createInitialLivenessState());
+
   // ค่ากำหนดสำหรับตรวจระยะ
-  const MIN_FACE_WIDTH = 180; // ขนาดใบหน้าขั้นต่ำ (ยิ่งมากยิ่งต้องใกล้)
+  const MIN_FACE_WIDTH = 180;
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const faceMatcherRef = useRef<faceapi.FaceMatcher | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const matchCountRef = useRef(0);
   const stableCountRef = useRef(0);
-  const lastMatchLabelRef = useRef<string | null>(null);
   const matchedUserRef = useRef<MatchedUser | null>(null);
   const lastFailReasonRef = useRef<string | null>(null);
   const lastFailAtRef = useRef(0);
 
-  // === Adaptive Threshold สำหรับ Login (รองรับแมสก์) ===
-  const THRESHOLD_STRICT = 0.38;   // ถ้า distance < นี้ = แม่นมาก ผ่านเร็ว (ไม่สวมแมส)
-  const THRESHOLD_NORMAL = 0.48;   // ถ้า distance < นี้ = ปานกลาง ต้องยืนยันมากขึ้น
-  const THRESHOLD_MASK = 0.55;     // ถ้า distance < นี้ = อาจสวมแมส ต้องยืนยันหลายเฟรมมาก
-  // ถ้า distance >= THRESHOLD_MASK = ไม่ผ่าน
+  // Thresholds สำหรับ Face Match
+  const THRESHOLD_STRICT = 0.38;
+  const THRESHOLD_NORMAL = 0.48;
+  const THRESHOLD_MASK = 0.55;
+  const STABLE_STRICT = 4;
+  const STABLE_NORMAL = 8;
+  const STABLE_MASK = 15;
 
-  const STABLE_STRICT = 4;    // เฟรมที่ต้องติดต่อกัน (distance < 0.38)
-  const STABLE_NORMAL = 8;    // เฟรมที่ต้องติดต่อกัน (distance < 0.48)
-  const STABLE_MASK = 15;     // เฟรมที่ต้องติดต่อกัน (distance < 0.55) - ยืนยันนานเพื่อความแม่น
-
-  const DETECTOR_INPUT_SIZE = 192; // มือถือ 160-192
+  const DETECTOR_INPUT_SIZE = 192;
   const DETECTOR_SCORE_THRESHOLD = 0.4;
   const ZONE_W = 220;
   const ZONE_H = 300;
+
+  // Required blinks for liveness
+  const REQUIRED_BLINKS = 2;
 
   const stopDetection = () => {
     if (intervalRef.current) clearInterval(intervalRef.current);
@@ -59,6 +76,15 @@ export default function LoginPage() {
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
+  };
+
+  const resetLivenessState = () => {
+    setLivenessStep(0);
+    setBlinkCount(0);
+    livenessStateRef.current = createInitialLivenessState();
+    stableCountRef.current = 0;
+    // สุ่มทิศทางหัน
+    setTurnDirection(Math.random() > 0.5 ? 'left' : 'right');
   };
 
   useEffect(() => {
@@ -134,6 +160,7 @@ export default function LoginPage() {
         body: JSON.stringify({
           eventType: 'LOGIN_SCAN_SUCCESS',
           source: 'login',
+          livenessVerified: true,
           email: (matchedUserRef.current?.email || formData.email || '').trim().toLowerCase()
         })
       });
@@ -164,14 +191,11 @@ export default function LoginPage() {
       matchedUserRef.current = user;
       const descriptor = new Float32Array(user.descriptor);
       const labeledDescriptor = new faceapi.LabeledFaceDescriptors(user.email, [descriptor]);
-      // Threshold 0.58 รองรับแมส แต่ใช้ Adaptive Check ภายหลังเพื่อกันผิดคน
       faceMatcherRef.current = new faceapi.FaceMatcher([labeledDescriptor], 0.58);
-      matchCountRef.current = 0;
-      stableCountRef.current = 0;
-      lastMatchLabelRef.current = null;
 
+      resetLivenessState();
       setStep(2);
-      setStatus('กรุณามองกล้องเพื่อยืนยันใบหน้า');
+      setStatus('👁️ กรุณากระพริบตา 2 ครั้ง');
       setTimeout(() => startVideo(), 100);
     } catch (err) {
       console.error(err);
@@ -215,93 +239,136 @@ export default function LoginPage() {
       if (context) context.clearRect(0, 0, canvas.width, canvas.height);
 
       if (!detection) {
-        stableCountRef.current = 0;
-        matchCountRef.current = 0;
         setStatus('❌ ไม่พบใบหน้า (ขยับเข้ามาในกรอบ)');
-        logScanFail('NO_FACE', 'ไม่พบใบหน้า (ขยับเข้ามาในกรอบ)');
         return;
       }
 
-      // --- ตรวจระยะใบหน้า ---
       const box = detection.detection.box;
       const isCloseEnough = box.width >= MIN_FACE_WIDTH;
       if (!isCloseEnough) {
-        stableCountRef.current = 0;
-        matchCountRef.current = 0;
         setStatus('🟠 กรุณาขยับหน้าเข้ามาใกล้กล้อง');
-        logScanFail('TOO_FAR', 'กรุณาขยับหน้าเข้ามาใกล้กล้อง');
         return;
       }
 
-      // --- ตรวจ Zone ---
       if (!isInZone(box)) {
-        stableCountRef.current = 0;
-        matchCountRef.current = 0;
         setStatus('🟥 กรุณาอยู่ในกรอบกลาง');
-        logScanFail('OUT_OF_ZONE', 'กรุณาอยู่ในกรอบกลาง');
         return;
       }
 
       const resized = faceapi.resizeResults(detection, displaySize);
       faceapi.draw.drawFaceLandmarks(canvas, resized);
 
-      const matcher = faceMatcherRef.current;
-      if (!matcher) return;
-      const bestMatch = matcher.findBestMatch(detection.descriptor);
-      const distance = bestMatch.distance;
+      const landmarks = detection.landmarks;
 
-      // Debug: แสดง distance ใน console
-      console.log(`[LOGIN] Face match: ${bestMatch.label}, distance: ${distance.toFixed(3)}`);
+      // ===== LIVENESS STEP 0: Blink Detection =====
+      if (livenessStep === 0) {
+        const { isBlink, currentEAR, newState } = detectBlink(landmarks, livenessStateRef.current);
+        livenessStateRef.current = newState;
 
-      // === Adaptive Threshold Logic (รองรับแมสก์) ===
-      if (bestMatch.label !== 'unknown') {
-        // กำหนดจำนวนเฟรมที่ต้องการตาม distance
-        let requiredFrames: number;
-        let statusIcon: string;
+        if (isBlink) {
+          const newCount = blinkCount + 1;
+          setBlinkCount(newCount);
 
-        if (distance < THRESHOLD_STRICT) {
-          // แม่นมาก (ไม่สวมแมส) - ต้อง 4 เฟรม
-          requiredFrames = STABLE_STRICT;
-          statusIcon = '🟢';
-        } else if (distance < THRESHOLD_NORMAL) {
-          // ปานกลาง - ต้อง 8 เฟรม
-          requiredFrames = STABLE_NORMAL;
-          statusIcon = '🟡';
-        } else if (distance < THRESHOLD_MASK) {
-          // อาจสวมแมส - ต้อง 15 เฟรม (ยืนยันนานเพื่อความแม่นยำ)
-          requiredFrames = STABLE_MASK;
-          statusIcon = '�';
+          if (newCount >= REQUIRED_BLINKS) {
+            setLivenessStep(1);
+            setStatus(getChallengeInstruction(turnDirection === 'left' ? 'turn_left' : 'turn_right'));
+          } else {
+            setStatus(`�️ กระพริบตาแล้ว ${newCount}/${REQUIRED_BLINKS} ครั้ง`);
+          }
         } else {
-          // ไม่ผ่าน threshold - distance สูงเกินไป
-          stableCountRef.current = 0;
-          matchCountRef.current = 0;
-          lastMatchLabelRef.current = null;
-          setStatus(`⚠️ ใบหน้าไม่ตรงกับบัญชี [${distance.toFixed(2)}]`);
-          logScanFail('LOW_CONFIDENCE', `ใบหน้าไม่ตรง (distance: ${distance.toFixed(3)})`, bestMatch.toString());
-          return;
+          const eyeStatus = currentEAR < 0.21 ? '(กำลังหลับตา...)' : '';
+          setStatus(`👁️ กรุณากระพริบตา ${blinkCount}/${REQUIRED_BLINKS} ${eyeStatus}`);
         }
-
-        stableCountRef.current += 1;
-
-        if (stableCountRef.current < requiredFrames) {
-          setStatus(`${statusIcon} กำลังยืนยัน... (${stableCountRef.current}/${requiredFrames}) [${distance.toFixed(2)}]`);
-          return;
-        }
-
-        setStatus('✅ ยืนยันตัวตนสำเร็จ');
-        logScanSuccess();
-        stopDetection();
-        stopVideo();
-        localStorage.setItem('currentUser', JSON.stringify(matchedUserRef.current));
-        setTimeout(() => router.push('/home'), 500);
-      } else {
-        stableCountRef.current = 0;
-        matchCountRef.current = 0;
-        lastMatchLabelRef.current = null;
-        setStatus(`❌ ใบหน้าไม่ตรงกับบัญชีนี้ [${distance.toFixed(2)}]`);
-        logScanFail('UNKNOWN_FACE', `ใบหน้าไม่ตรง (distance: ${distance.toFixed(3)})`, bestMatch.toString());
+        return;
       }
-    }, 200);
+
+      // ===== LIVENESS STEP 1: Head Turn Detection =====
+      if (livenessStep === 1) {
+        const isTurned = detectHeadTurn(landmarks, turnDirection);
+
+        if (isTurned) {
+          setLivenessStep(2);
+          stableCountRef.current = 0;
+          setStatus('✅ Liveness ผ่าน! กลับมามองตรงเพื่อยืนยันใบหน้า');
+        } else {
+          const dirText = turnDirection === 'left' ? 'ซ้าย' : 'ขวา';
+          setStatus(`👈 กรุณาหันหน้าไปทาง${dirText}`);
+        }
+        return;
+      }
+
+      // ===== LIVENESS STEP 2: Face Verification (ต้องหันกลับมาหน้าตรง) =====
+      if (livenessStep === 2) {
+        // ตรวจว่าหันกลับมาหน้าตรงหรือยัง
+        if (!isFacingStraight(landmarks)) {
+          setStatus('🔵 กรุณากลับมามองหน้าตรง');
+          stableCountRef.current = 0;
+          return;
+        }
+
+        const matcher = faceMatcherRef.current;
+        if (!matcher) return;
+        const bestMatch = matcher.findBestMatch(detection.descriptor);
+        const distance = bestMatch.distance;
+
+        console.log(`[LOGIN] Face match: ${bestMatch.label}, distance: ${distance.toFixed(3)}`);
+
+        if (bestMatch.label !== 'unknown') {
+          let requiredFrames: number;
+          let statusIcon: string;
+
+          if (distance < THRESHOLD_STRICT) {
+            requiredFrames = STABLE_STRICT;
+            statusIcon = '🟢';
+          } else if (distance < THRESHOLD_NORMAL) {
+            requiredFrames = STABLE_NORMAL;
+            statusIcon = '🟡';
+          } else if (distance < THRESHOLD_MASK) {
+            requiredFrames = STABLE_MASK;
+            statusIcon = '🟠';
+          } else {
+            stableCountRef.current = 0;
+            setStatus(`⚠️ ใบหน้าไม่ตรงกับบัญชี [${distance.toFixed(2)}]`);
+            logScanFail('LOW_CONFIDENCE', `ใบหน้าไม่ตรง (distance: ${distance.toFixed(3)})`, bestMatch.toString());
+            return;
+          }
+
+          stableCountRef.current += 1;
+
+          if (stableCountRef.current < requiredFrames) {
+            setStatus(`${statusIcon} กำลังยืนยัน... (${stableCountRef.current}/${requiredFrames}) [${distance.toFixed(2)}]`);
+            return;
+          }
+
+          // SUCCESS!
+          setLivenessStep(3);
+          setStatus('✅ ยืนยันตัวตนสำเร็จ!');
+          logScanSuccess();
+          stopDetection();
+          stopVideo();
+          localStorage.setItem('currentUser', JSON.stringify(matchedUserRef.current));
+          setTimeout(() => router.push('/home'), 800);
+        } else {
+          stableCountRef.current = 0;
+          setStatus(`❌ ใบหน้าไม่ตรงกับบัญชีนี้ [${distance.toFixed(2)}]`);
+          logScanFail('UNKNOWN_FACE', `ใบหน้าไม่ตรง (distance: ${distance.toFixed(3)})`, bestMatch.toString());
+        }
+      }
+    }, 150);
+  };
+
+  // Get border color based on liveness step
+  const getBorderClass = () => {
+    if (livenessStep === 3 || status.includes('✅ ยืนยันตัวตนสำเร็จ')) {
+      return 'border-green-400 shadow-[0_0_20px_rgba(74,222,128,0.5)]';
+    }
+    if (livenessStep === 2) {
+      return 'border-blue-400 border-solid';
+    }
+    if (livenessStep === 1) {
+      return 'border-yellow-400 border-dashed';
+    }
+    return 'border-purple-400/70 border-dashed'; // blink stage
   };
 
   return (
@@ -351,6 +418,25 @@ export default function LoginPage() {
 
         {step === 2 && (
           <div className="flex flex-col items-center gap-4">
+            {/* Liveness Progress Indicator */}
+            <div className="flex items-center gap-2 mb-2">
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${livenessStep >= 0 ? 'bg-purple-500 text-white' : 'bg-gray-300'}`}>
+                👁️
+              </div>
+              <div className={`w-8 h-1 ${livenessStep >= 1 ? 'bg-yellow-500' : 'bg-gray-300'}`}></div>
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${livenessStep >= 1 ? 'bg-yellow-500 text-white' : 'bg-gray-300'}`}>
+                {turnDirection === 'left' ? '👈' : '👉'}
+              </div>
+              <div className={`w-8 h-1 ${livenessStep >= 2 ? 'bg-blue-500' : 'bg-gray-300'}`}></div>
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${livenessStep >= 2 ? 'bg-blue-500 text-white' : 'bg-gray-300'}`}>
+                🔵
+              </div>
+              <div className={`w-8 h-1 ${livenessStep >= 3 ? 'bg-green-500' : 'bg-gray-300'}`}></div>
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${livenessStep >= 3 ? 'bg-green-500 text-white' : 'bg-gray-300'}`}>
+                ✅
+              </div>
+            </div>
+
             <div className="relative w-full aspect-[4/3] bg-black rounded-xl overflow-hidden shadow-inner group">
               <video
                 ref={videoRef}
@@ -365,11 +451,9 @@ export default function LoginPage() {
                 className="absolute top-0 left-0 w-full h-full scale-x-[-1]"
               />
 
-              {/* Face Frame (กรอบหน้า) */}
+              {/* Face Frame */}
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <div className={`w-[220px] h-[300px] border-4 rounded-[50%] transition-colors duration-300 shadow-[0_0_100px_rgba(0,0,0,0.5)_inset]
-                      ${status.includes('✅') ? 'border-green-400 shadow-[0_0_20px_rgba(74,222,128,0.5)]' : 'border-blue-400/70 border-dashed'}
-                  `}></div>
+                <div className={`w-[220px] h-[300px] border-4 rounded-[50%] transition-colors duration-300 shadow-[0_0_100px_rgba(0,0,0,0.5)_inset] ${getBorderClass()}`}></div>
               </div>
 
               <div className="absolute bottom-4 left-0 right-0 text-center px-4">
@@ -385,6 +469,7 @@ export default function LoginPage() {
                 stopVideo();
                 setStep(1);
                 setStatus('กรอกอีเมลและรหัสผ่าน');
+                resetLivenessState();
               }}
               className="text-gray-500 text-sm hover:underline"
             >
