@@ -195,7 +195,8 @@ export default function CheckIn() {
     intervalRef.current = setInterval(async () => {
       if (!videoRef.current || !canvasRef.current || !faceMatcherRef.current || videoRef.current.paused || videoRef.current.ended) return;
 
-      const displaySize = { width: videoRef.current.videoWidth, height: videoRef.current.videoHeight };
+      // ใช้ clientWidth/clientHeight เพื่อให้ตรงกับขนาดที่แสดงผลจริง (ไม่ใช่ resolution ของกล้อง)
+      const displaySize = { width: videoRef.current.clientWidth, height: videoRef.current.clientHeight };
       if (displaySize.width === 0) return;
 
       faceapi.matchDimensions(canvasRef.current, displaySize);
@@ -404,20 +405,18 @@ export default function CheckIn() {
     <div className="flex flex-col items-center min-h-screen bg-gray-100 text-white p-4">
       <h1 className="text-3xl font-bold mb-4 text-cyan-400">ระบบลงเวลา (Liveness Detection)</h1>
 
-      <div className="relative border-4 border-slate-700 rounded-lg overflow-hidden shadow-2xl bg-black">
+      <div className="relative border-4 border-slate-700 rounded-lg overflow-hidden shadow-2xl bg-black w-full max-w-[640px] aspect-[4/3]">
         <video
           ref={videoRef}
           autoPlay
           muted
           playsInline
           onPlay={handleVideoPlay}
-          width="640"
-          height="480"
-          className="scale-x-[-1]"
+          className="absolute inset-0 w-full h-full object-contain scale-x-[-1]"
         />
         <canvas
           ref={canvasRef}
-          className="absolute top-0 left-0 scale-x-[-1]"
+          className="absolute inset-0 w-full h-full object-contain scale-x-[-1]"
         />
       </div>
 

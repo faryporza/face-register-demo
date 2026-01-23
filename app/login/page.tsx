@@ -262,7 +262,8 @@ export default function LoginPage() {
       }
 
       const resized = faceapi.resizeResults(detection, displaySize);
-      faceapi.draw.drawFaceLandmarks(canvas, resized);
+      // ไม่ต้องวาด landmark ตอนสแกน
+      // faceapi.draw.drawFaceLandmarks(canvas, resized); 
 
       const landmarks = detection.landmarks;
 
