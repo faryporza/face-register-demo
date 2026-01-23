@@ -6,6 +6,7 @@ import Link from 'next/link';
 import {
   detectHeadTurn,
   isFacingStraight,
+  detectMask,
 } from '@/lib/livenessDetection';
 import { loadFaceModels } from '@/lib/faceApi';
 
@@ -44,12 +45,14 @@ export default function LoginPage() {
   const lastFailAtRef = useRef(0);
 
   // Thresholds สำหรับ Face Match
+  // Threshold เดียวกันไม่ว่าจะใส่ mask หรือไม่ (ป้องกัน false match)
   const THRESHOLD_STRICT = 0.42;
-  const THRESHOLD_NORMAL = 0.52;
-  const THRESHOLD_MASK = 0.60;
+  const THRESHOLD_NORMAL = 0.48;
+
+  // Stable frames: ถ้าใส่ mask ต้องยืนยันนานขึ้น
   const STABLE_STRICT = 4;
   const STABLE_NORMAL = 8;
-  const STABLE_MASK = 12;
+  const STABLE_MASK_MULTIPLIER = 2.5; // คูณจำนวน frames เมื่อใส่ mask
 
   const DETECTOR_INPUT_SIZE = 192;
   const DETECTOR_SCORE_THRESHOLD = 0.4;
@@ -192,7 +195,8 @@ export default function LoginPage() {
       matchedUserRef.current = user;
       const descriptor = new Float32Array(user.descriptor);
       const labeledDescriptor = new faceapi.LabeledFaceDescriptors(user.email, [descriptor]);
-      faceMatcherRef.current = new faceapi.FaceMatcher([labeledDescriptor], 1.0);
+      // ลด threshold จาก 1.0 เป็น 0.55 เพื่อให้ปฏิเสธใบหน้าที่ไม่ตรงจริงๆ
+      faceMatcherRef.current = new faceapi.FaceMatcher([labeledDescriptor], 0.55);
 
       resetLivenessState();
       setStep(2);
@@ -291,32 +295,41 @@ export default function LoginPage() {
         const bestMatch = matcher.findBestMatch(detection.descriptor);
         const distance = bestMatch.distance;
 
-        console.log(`[LOGIN] Face match: ${bestMatch.label}, distance: ${distance.toFixed(3)}`);
+        // ตรวจจับว่าใส่ Mask หรือไม่
+        const isMask = detectMask(landmarks);
+        const maskLabel = isMask ? '😷' : '';
+
+        console.log(`[LOGIN] Face match: ${bestMatch.label}, distance: ${distance.toFixed(3)}, mask: ${isMask}`);
 
         if (bestMatch.label !== 'unknown') {
           let requiredFrames: number;
           let statusIcon: string;
 
+          // ใช้ threshold เดียวกันไม่ว่าจะใส่ mask หรือไม่ (ไม่ให้ mask ทำให้ระบบอ่อนลง)
           if (distance < THRESHOLD_STRICT) {
             requiredFrames = STABLE_STRICT;
             statusIcon = '🟢';
           } else if (distance < THRESHOLD_NORMAL) {
             requiredFrames = STABLE_NORMAL;
             statusIcon = '🟡';
-          } else if (distance < THRESHOLD_MASK) {
-            requiredFrames = STABLE_MASK;
-            statusIcon = '🟠';
           } else {
             stableCountRef.current = 0;
-            setStatus(`⚠️ ใบหน้าไม่ตรงกับบัญชี [${distance.toFixed(2)}]`);
-            logScanFail('LOW_CONFIDENCE', `ใบหน้าไม่ตรง (distance: ${distance.toFixed(3)})`, bestMatch.toString());
+            const maskNote = isMask ? ' (ตรวจพบ Mask - ลองถอด Mask)' : '';
+            setStatus(`⚠️ ใบหน้าไม่ตรงกับบัญชี${maskNote} [${distance.toFixed(2)}]`);
+            logScanFail('LOW_CONFIDENCE', `ใบหน้าไม่ตรง (distance: ${distance.toFixed(3)}, mask: ${isMask})`, bestMatch.toString());
             return;
+          }
+
+          // ถ้าใส่ mask ต้องยืนยันนานขึ้น (คูณจำนวน frames)
+          if (isMask) {
+            requiredFrames = Math.ceil(requiredFrames * STABLE_MASK_MULTIPLIER);
+            statusIcon = '🟠';
           }
 
           stableCountRef.current += 1;
 
           if (stableCountRef.current < requiredFrames) {
-            setStatus(`${statusIcon} กำลังยืนยัน... (${stableCountRef.current}/${requiredFrames}) [${distance.toFixed(2)}]`);
+            setStatus(`${statusIcon} ${maskLabel} กำลังยืนยัน... (${stableCountRef.current}/${requiredFrames}) [${distance.toFixed(2)}]`);
             return;
           }
 

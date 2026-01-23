@@ -199,6 +199,73 @@ export function isFacingStraight(landmarks: faceapi.FaceLandmarks68): boolean {
     return ratio > 0.75 && ratio < 1.35;
 }
 
+/**
+ * ตรวจจับว่าผู้ใช้น่าจะสวม Mask หรือไม่
+ * วิเคราะห์จากตำแหน่ง landmarks อย่างเข้มงวด:
+ * - ต้องผ่านหลายเงื่อนไขพร้อมกัน (AND) เพื่อลด false positive
+ * 
+ * @returns true ถ้ามั่นใจว่าใส่ mask
+ */
+export function detectMask(landmarks: faceapi.FaceLandmarks68): boolean {
+    const nose = landmarks.getNose();
+    const mouth = landmarks.getMouth();
+    const leftEye = landmarks.getLeftEye();
+    const rightEye = landmarks.getRightEye();
+
+    // คำนวณจุดกลางตา
+    const eyeCenterY = (leftEye[0].y + rightEye[3].y) / 2;
+
+    // จุดจมูก
+    const noseTip = nose[6]; // ปลายจมูก
+    const noseTop = nose[0]; // โคนจมูก
+
+    // จุดปาก
+    const mouthTop = mouth[3];
+    const mouthBottom = mouth[9];
+    const mouthLeft = mouth[0];
+    const mouthRight = mouth[6];
+
+    // ระยะจากตาถึงจมูก
+    const eyeToNose = noseTip.y - eyeCenterY;
+
+    // ระยะจากจมูกถึงปาก
+    const noseToMouth = mouthTop.y - noseTip.y;
+
+    // ความสูงของปาก
+    const mouthHeight = mouthBottom.y - mouthTop.y;
+
+    // ความกว้างของปาก
+    const mouthWidth = Math.abs(mouthRight.x - mouthLeft.x);
+
+    // ความยาวของจมูก
+    const noseLength = noseTip.y - noseTop.y;
+
+    // ป้องกัน division by zero
+    if (noseLength <= 0 || eyeToNose <= 0 || mouthWidth <= 0) {
+        return false;
+    }
+
+    // คำนวณ ratios
+    const mouthHeightRatio = mouthHeight / noseLength;
+    const lowerFaceRatio = noseToMouth / eyeToNose;
+    const mouthAspectRatio = mouthHeight / mouthWidth;
+
+    // ค่าปกติ (ไม่ใส่ mask):
+    // - mouthHeightRatio: 0.4 - 1.0
+    // - lowerFaceRatio: 0.5 - 0.9
+    // - mouthAspectRatio: 0.15 - 0.5
+
+    // ถ้าใส่ mask จริงๆ ต้องผ่านอย่างน้อย 2 ใน 3 เงื่อนไข (AND แบบ majority)
+    const isMouthTooNarrow = mouthHeightRatio < 0.25;
+    const isLowerFaceAbnormal = lowerFaceRatio < 0.35;
+    const isMouthAspectAbnormal = mouthAspectRatio < 0.08;
+
+    const conditionsMet = [isMouthTooNarrow, isLowerFaceAbnormal, isMouthAspectAbnormal].filter(Boolean).length;
+
+    // ต้องผ่านอย่างน้อย 2 เงื่อนไข จึงจะถือว่าใส่ mask
+    return conditionsMet >= 2;
+}
+
 // ===== Motion Detection =====
 /**
  * ตรวจจับความเคลื่อนไหวจากตำแหน่ง landmarks
