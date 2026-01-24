@@ -28,13 +28,26 @@ export default function FaceSetupPage() {
     const ZONE_H = 300;
 
     useEffect(() => {
-        // Check login
-        const stored = localStorage.getItem('currentUser');
-        if (!stored) {
-            router.push('/login');
-            return;
-        }
-        setCurrentUser(JSON.parse(stored));
+        // Check login via session API
+        const checkAuth = async () => {
+            try {
+                const response = await fetch('/api/me', { credentials: 'include' });
+                if (!response.ok) {
+                    router.push('/login');
+                    return;
+                }
+                const data = await response.json();
+                if (data.success && data.user) {
+                    setCurrentUser(data.user);
+                    await initModels();
+                } else {
+                    router.push('/login');
+                }
+            } catch (error) {
+                console.error('Auth check error:', error);
+                router.push('/login');
+            }
+        };
 
         const initModels = async () => {
             try {
@@ -46,7 +59,8 @@ export default function FaceSetupPage() {
                 setStatus('โหลด Model ไม่ผ่าน');
             }
         };
-        initModels();
+
+        checkAuth();
 
         return () => {
             stopDetection();
@@ -175,7 +189,6 @@ export default function FaceSetupPage() {
             const result = await response.json();
             if (result.success) {
                 setStatus('✅ บันทึกสำเร็จ!');
-                localStorage.setItem('currentUser', JSON.stringify(result.user));
                 stopDetection();
                 stopVideo();
                 setTimeout(() => router.push('/home'), 1000);

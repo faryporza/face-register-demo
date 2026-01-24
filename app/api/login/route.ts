@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { getMongoClient } from '@/lib/mongodb';
 import { writeAuditLog } from '@/lib/auditLog';
+import { setSessionCookie, type SessionUser } from '@/lib/session';
 
 const isBcryptHash = (value: string) => value.startsWith('$2a$') || value.startsWith('$2b$') || value.startsWith('$2y$');
 
@@ -92,9 +93,22 @@ export async function POST(req: Request) {
       user.password = newHash;
     }
 
-    const { password: _unusedPassword, ...safeUser } = user as { password?: unknown; [key: string]: unknown };
+    const { password: _unusedPassword, descriptor: _unusedDescriptor, ...safeUser } = user as { password?: unknown; descriptor?: unknown;[key: string]: unknown };
     void _unusedPassword;
-    const normalizedUser = { ...safeUser, _id: user._id?.toString?.() || user._id };
+    void _unusedDescriptor;
+
+    const hasFace = !!(user.descriptor && Array.isArray(user.descriptor) && user.descriptor.length > 0);
+    const sessionUser: SessionUser = {
+      _id: user._id?.toString?.() || String(user._id),
+      email: normalizedEmail,
+      name: String(user.name || ''),
+      surname: String(user.surname || ''),
+      prefix: user.prefix as string | undefined,
+      phone: user.phone as string | undefined,
+      type: user.type as string | undefined,
+      hasFace
+    };
+
     await writeAuditLog(req, {
       event: 'login',
       status: 'success',
@@ -102,7 +116,14 @@ export async function POST(req: Request) {
       userId: user._id?.toString?.() || String(user._id)
     });
 
-    return NextResponse.json({ success: true, user: normalizedUser });
+    // Create response with session cookie (no descriptor in response)
+    const response = NextResponse.json({
+      success: true,
+      user: { ...sessionUser },
+      needsFaceVerification: hasFace,
+      needsFaceSetup: !hasFace
+    });
+    return setSessionCookie(response, sessionUser);
   } catch (error) {
     console.error(error);
     await writeAuditLog(req, {

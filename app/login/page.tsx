@@ -37,12 +37,12 @@ export default function LoginPage() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
-  const faceMatcherRef = useRef<faceapi.FaceMatcher | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const stableCountRef = useRef(0);
   const matchedUserRef = useRef<MatchedUser | null>(null);
   const lastFailReasonRef = useRef<string | null>(null);
   const lastFailAtRef = useRef(0);
+  const isVerifyingRef = useRef(false);
 
   // Thresholds สำหรับ Face Match
   // Threshold เดียวกันไม่ว่าจะใส่ mask หรือไม่ (ป้องกัน false match)
@@ -172,7 +172,8 @@ export default function LoginPage() {
       const response = await fetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: formData.email, password: formData.password })
+        body: JSON.stringify({ email: formData.email, password: formData.password }),
+        credentials: 'include' // Important for cookies
       });
 
       const result = await response.json();
@@ -183,21 +184,16 @@ export default function LoginPage() {
       }
 
       const user = result.user;
+      matchedUserRef.current = user;
 
       // Check for Face Data
-      if (!user.descriptor || user.descriptor.length === 0) {
-        localStorage.setItem('currentUser', JSON.stringify(user));
+      if (result.needsFaceSetup) {
         alert('บัญชีนี้ยังไม่ได้บันทึกใบหน้า กรุณาบันทึกใบหน้าใหม่');
         router.push('/face-setup');
         return;
       }
 
-      matchedUserRef.current = user;
-      const descriptor = new Float32Array(user.descriptor);
-      const labeledDescriptor = new faceapi.LabeledFaceDescriptors(user.email, [descriptor]);
-      // ลด threshold จาก 1.0 เป็น 0.55 เพื่อให้ปฏิเสธใบหน้าที่ไม่ตรงจริงๆ
-      faceMatcherRef.current = new faceapi.FaceMatcher([labeledDescriptor], 0.55);
-
+      // Proceed to face verification step (server-side verification)
       resetLivenessState();
       setStep(2);
       const dirText = turnDirection === 'left' ? 'ซ้าย' : 'ขวา';
@@ -210,7 +206,7 @@ export default function LoginPage() {
   };
 
   const handleVideoPlay = () => {
-    if (!videoRef.current || !canvasRef.current || !faceMatcherRef.current) return;
+    if (!videoRef.current || !canvasRef.current) return;
 
     const video = videoRef.current;
     const canvas = canvasRef.current;
@@ -291,63 +287,60 @@ export default function LoginPage() {
           return;
         }
 
-        const matcher = faceMatcherRef.current;
-        if (!matcher) return;
-        const bestMatch = matcher.findBestMatch(detection.descriptor);
-        const distance = bestMatch.distance;
-
         // ตรวจจับว่าใส่ Mask หรือไม่
         const isMask = detectMask(landmarks);
         const maskLabel = isMask ? '😷' : '';
 
-        console.log(`[LOGIN] Face match: ${bestMatch.label}, distance: ${distance.toFixed(3)}, mask: ${isMask}`);
+        // Use server-side verification
+        if (isVerifyingRef.current) return; // Prevent multiple verification calls
 
-        if (bestMatch.label !== 'unknown') {
-          let requiredFrames: number;
-          let statusIcon: string;
+        stableCountRef.current += 1;
 
-          // ใช้ threshold เดียวกันไม่ว่าจะใส่ mask หรือไม่ (ไม่ให้ mask ทำให้ระบบอ่อนลง)
-          if (distance < THRESHOLD_STRICT) {
-            requiredFrames = STABLE_STRICT;
-            statusIcon = '🟢';
-          } else if (distance < THRESHOLD_NORMAL) {
-            requiredFrames = STABLE_NORMAL;
-            statusIcon = '🟡';
-          } else {
-            stableCountRef.current = 0;
-            const maskNote = isMask ? ' (ตรวจพบ Mask - ลองถอด Mask)' : '';
-            setStatus(`⚠️ ใบหน้าไม่ตรงกับบัญชี${maskNote} [${distance.toFixed(2)}]`);
-            logScanFail('LOW_CONFIDENCE', `ใบหน้าไม่ตรง (distance: ${distance.toFixed(3)}, mask: ${isMask})`, bestMatch.toString());
-            return;
-          }
+        // Require stable frames before verifying
+        const requiredFrames = isMask ? Math.ceil(STABLE_NORMAL * STABLE_MASK_MULTIPLIER) : STABLE_NORMAL;
 
-          // ถ้าใส่ mask ต้องยืนยันนานขึ้น (คูณจำนวน frames)
-          if (isMask) {
-            requiredFrames = Math.ceil(requiredFrames * STABLE_MASK_MULTIPLIER);
-            statusIcon = '🟠';
-          }
-
-          stableCountRef.current += 1;
-
-          if (stableCountRef.current < requiredFrames) {
-            setStatus(`${statusIcon} ${maskLabel} กำลังยืนยัน... (${stableCountRef.current}/${requiredFrames}) [${distance.toFixed(2)}]`);
-            return;
-          }
-
-          // SUCCESS!
-          livenessStepRef.current = 2;
-          setLivenessStep(2);
-          setStatus('✅ ยืนยันตัวตนสำเร็จ!');
-          logScanSuccess();
-          stopDetection();
-          stopVideo();
-          localStorage.setItem('currentUser', JSON.stringify(matchedUserRef.current));
-          setTimeout(() => router.push('/home'), 800);
-        } else {
-          stableCountRef.current = 0;
-          setStatus(`❌ ใบหน้าไม่ตรงกับบัญชีนี้ [${distance.toFixed(2)}]`);
-          logScanFail('UNKNOWN_FACE', `ใบหน้าไม่ตรง (distance: ${distance.toFixed(3)})`, bestMatch.toString());
+        if (stableCountRef.current < requiredFrames) {
+          setStatus(`🟡 ${maskLabel} กำลังยืนยัน... (${stableCountRef.current}/${requiredFrames})`);
+          return;
         }
+
+        // Send descriptor to server for verification
+        isVerifyingRef.current = true;
+        setStatus('🔄 กำลังตรวจสอบใบหน้ากับ Server...');
+
+        const capturedDescriptor = Array.from(detection.descriptor);
+
+        fetch('/api/verify-face', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ descriptor: capturedDescriptor }),
+          credentials: 'include'
+        })
+          .then(res => res.json())
+          .then(result => {
+            if (result.success) {
+              // SUCCESS!
+              livenessStepRef.current = 2;
+              setLivenessStep(2);
+              setStatus('✅ ยืนยันตัวตนสำเร็จ!');
+              logScanSuccess();
+              stopDetection();
+              stopVideo();
+              setTimeout(() => router.push('/home'), 800);
+            } else {
+              stableCountRef.current = 0;
+              isVerifyingRef.current = false;
+              const maskNote = isMask ? ' (ลองถอด Mask)' : '';
+              setStatus(`⚠️ ใบหน้าไม่ตรงกับบัญชี${maskNote} [${result.distance?.toFixed(2) || 'N/A'}]`);
+              logScanFail('LOW_CONFIDENCE', `ใบหน้าไม่ตรง (distance: ${result.distance})`);
+            }
+          })
+          .catch(err => {
+            console.error('Face verification error:', err);
+            stableCountRef.current = 0;
+            isVerifyingRef.current = false;
+            setStatus('❌ เกิดข้อผิดพลาดในการยืนยันใบหน้า');
+          });
       }
     }, 250);
   };

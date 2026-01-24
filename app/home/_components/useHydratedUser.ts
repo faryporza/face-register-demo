@@ -5,34 +5,40 @@ import { useRouter } from 'next/navigation';
 export default function useHydratedUser() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const storedUser = localStorage.getItem('currentUser');
-    if (!storedUser) {
-      router.push('/login');
-      return;
-    }
-
-    const parsedUser = JSON.parse(storedUser);
-    setUser(parsedUser);
-
-    if (!parsedUser?.type && parsedUser?.email) {
-      fetch('/api/faces')
-        .then((res) => res.json())
-        .then((faces) => {
-          if (!Array.isArray(faces)) return;
-          const matched = faces.find((face: any) => face.email === parsedUser.email);
-          if (matched?.type) {
-            const updatedUser = { ...parsedUser, type: matched.type };
-            localStorage.setItem('currentUser', JSON.stringify(updatedUser));
-            setUser(updatedUser);
-          }
-        })
-        .catch(() => {
-          // ignore hydration errors
+    const fetchUser = async () => {
+      try {
+        const response = await fetch('/api/me', {
+          credentials: 'include'
         });
-    }
+
+        if (!response.ok) {
+          router.push('/login');
+          return;
+        }
+
+        const data = await response.json();
+        if (data.success && data.user) {
+          setUser(data.user);
+        } else {
+          router.push('/login');
+        }
+      } catch (error) {
+        console.error('Error fetching user:', error);
+        router.push('/login');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchUser();
   }, [router]);
+
+  // Return null while loading to prevent flash
+  if (loading) return null;
 
   return user;
 }
+

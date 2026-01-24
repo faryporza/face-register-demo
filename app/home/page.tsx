@@ -49,8 +49,12 @@ export default function AttendanceDashboard() {
     loadLogs();
   }, [user]);
 
-  const handleLogout = () => {
-    localStorage.removeItem('currentUser');
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/logout', { method: 'POST', credentials: 'include' });
+    } catch (error) {
+      console.error('Logout error:', error);
+    }
     window.location.href = '/login';
   };
 
@@ -103,199 +107,199 @@ export default function AttendanceDashboard() {
   return (
     <HomeShell user={user} active="dashboard" onLogout={handleLogout}>
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div>
-                <h2 className="text-2xl font-bold text-slate-900">ยินดีต้อนรับ, {user.name} 👋</h2>
-                <p className="text-slate-500 mt-1">จัดการเวลาและการลงทะเบียนของคุณได้ที่นี่</p>
-              </div>
-              <div className="text-right hidden md:block">
-                <p className="text-sm text-slate-400">วันที่ปัจจุบัน</p>
-                <p className="text-lg font-medium text-slate-700">{formatThaiDateLong(new Date().toISOString())}</p>
-              </div>
+        <div>
+          <h2 className="text-2xl font-bold text-slate-900">ยินดีต้อนรับ, {user.name} 👋</h2>
+          <p className="text-slate-500 mt-1">จัดการเวลาและการลงทะเบียนของคุณได้ที่นี่</p>
+        </div>
+        <div className="text-right hidden md:block">
+          <p className="text-sm text-slate-400">วันที่ปัจจุบัน</p>
+          <p className="text-lg font-medium text-slate-700">{formatThaiDateLong(new Date().toISOString())}</p>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <div className="lg:col-span-1 bg-white rounded-2xl p-6 shadow-sm border border-slate-100 relative overflow-hidden group">
-                <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-50 rounded-full -mr-16 -mt-16 transition-transform group-hover:scale-110"></div>
+        <div className="lg:col-span-1 bg-white rounded-2xl p-6 shadow-sm border border-slate-100 relative overflow-hidden group">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-50 rounded-full -mr-16 -mt-16 transition-transform group-hover:scale-110"></div>
 
-                <div className="relative flex flex-col items-center text-center">
-                  <div className="w-24 h-24 rounded-full border-4 border-white shadow-lg overflow-hidden mb-4 bg-indigo-100">
-                    <img src={avatar} alt="Profile" className="w-full h-full object-cover" />
-                  </div>
-                  <h3 className="text-xl font-bold text-slate-800">{userName}</h3>
-                  <div className="flex items-center gap-2 mt-1 px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-semibold">
-                    <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-                    Online
-                  </div>
+          <div className="relative flex flex-col items-center text-center">
+            <div className="w-24 h-24 rounded-full border-4 border-white shadow-lg overflow-hidden mb-4 bg-indigo-100">
+              <img src={avatar} alt="Profile" className="w-full h-full object-cover" />
+            </div>
+            <h3 className="text-xl font-bold text-slate-800">{userName}</h3>
+            <div className="flex items-center gap-2 mt-1 px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-semibold">
+              <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+              Online
+            </div>
 
-                  <div className="w-full mt-6 space-y-4">
-                    <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl">
-                      <div className="p-2 bg-white rounded-lg shadow-sm text-indigo-500">
-                        <Phone size={18} />
-                      </div>
-                      <div className="text-left">
-                        <p className="text-xs text-slate-400">เบอร์โทรศัพท์</p>
-                        <p className="text-sm font-medium text-slate-700">{user.phone || '-'}</p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl">
-                      <div className="p-2 bg-white rounded-lg shadow-sm text-indigo-500">
-                        <Mail size={18} />
-                      </div>
-                      <div className="text-left overflow-hidden">
-                        <p className="text-xs text-slate-400">อีเมล</p>
-                        <p className="text-sm font-medium text-slate-700 truncate">{user.email || '-'}</p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl">
-                      <div className="p-2 bg-white rounded-lg shadow-sm text-indigo-500">
-                        <Calendar size={18} />
-                      </div>
-                      <div className="text-left">
-                        <p className="text-xs text-slate-400">วันที่ลงทะเบียน</p>
-                        <p className="text-sm font-medium text-slate-700">{regDate}</p>
-                      </div>
-                    </div>
-                  </div>
+            <div className="w-full mt-6 space-y-4">
+              <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl">
+                <div className="p-2 bg-white rounded-lg shadow-sm text-indigo-500">
+                  <Phone size={18} />
+                </div>
+                <div className="text-left">
+                  <p className="text-xs text-slate-400">เบอร์โทรศัพท์</p>
+                  <p className="text-sm font-medium text-slate-700">{user.phone || '-'}</p>
                 </div>
               </div>
 
-      <div className="lg:col-span-2 space-y-6">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col justify-between hover:shadow-md transition-shadow">
-                    <div className="flex items-center gap-3 text-indigo-600 mb-2">
-                      <LayoutDashboard size={24} />
-                      <span className="text-sm font-medium text-indigo-900 bg-indigo-50 px-2 py-0.5 rounded-md">Total</span>
-                    </div>
-                    <div>
-                      <h4 className="text-slate-400 text-sm font-medium">จำนวน Log ทั้งหมด</h4>
-                      <p className="text-3xl font-bold text-slate-800 mt-1">{totalLogs}</p>
-                    </div>
-                  </div>
-
-                  <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col justify-between hover:shadow-md transition-shadow">
-                    <div className="flex items-center gap-3 text-emerald-600 mb-2">
-                      <CheckCircle size={24} />
-                      <span className="text-sm font-medium text-emerald-900 bg-emerald-50 px-2 py-0.5 rounded-md">Today</span>
-                    </div>
-                    <div>
-                      <h4 className="text-slate-400 text-sm font-medium">จำนวน Check-in</h4>
-                      <p className="text-3xl font-bold text-slate-800 mt-1">{checkInLogs}</p>
-                    </div>
-                  </div>
+              <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl">
+                <div className="p-2 bg-white rounded-lg shadow-sm text-indigo-500">
+                  <Mail size={18} />
                 </div>
-
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-                  <div className="flex items-center justify-between mb-6">
-                    <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2">
-                      <Activity className="text-indigo-500" size={20} />
-                      สถิติการลงเวลา (แยกตามวัน)
-                    </h3>
-                  </div>
-
-                  {logsError ? (
-                    <p className="text-sm text-red-500">{logsError}</p>
-                  ) : (
-                    <div className="h-[250px] w-full">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                          <defs>
-                            <linearGradient id="colorCount" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.3} />
-                              <stop offset="95%" stopColor="#4f46e5" stopOpacity={0} />
-                            </linearGradient>
-                          </defs>
-                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                          <XAxis
-                            dataKey="date"
-                            axisLine={false}
-                            tickLine={false}
-                            tick={{ fontSize: 12, fill: '#64748b' }}
-                            dy={10}
-                          />
-                          <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} />
-                          <Tooltip
-                            contentStyle={{
-                              borderRadius: '12px',
-                              border: 'none',
-                              boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'
-                            }}
-                          />
-                          <Area
-                            type="monotone"
-                            dataKey="count"
-                            stroke="#4f46e5"
-                            strokeWidth={3}
-                            fillOpacity={1}
-                            fill="url(#colorCount)"
-                          />
-                        </AreaChart>
-                      </ResponsiveContainer>
-                    </div>
-                  )}
+                <div className="text-left overflow-hidden">
+                  <p className="text-xs text-slate-400">อีเมล</p>
+                  <p className="text-sm font-medium text-slate-700 truncate">{user.email || '-'}</p>
                 </div>
               </div>
+
+              <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl">
+                <div className="p-2 bg-white rounded-lg shadow-sm text-indigo-500">
+                  <Calendar size={18} />
+                </div>
+                <div className="text-left">
+                  <p className="text-xs text-slate-400">วันที่ลงทะเบียน</p>
+                  <p className="text-sm font-medium text-slate-700">{regDate}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="lg:col-span-2 space-y-6">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col justify-between hover:shadow-md transition-shadow">
+              <div className="flex items-center gap-3 text-indigo-600 mb-2">
+                <LayoutDashboard size={24} />
+                <span className="text-sm font-medium text-indigo-900 bg-indigo-50 px-2 py-0.5 rounded-md">Total</span>
+              </div>
+              <div>
+                <h4 className="text-slate-400 text-sm font-medium">จำนวน Log ทั้งหมด</h4>
+                <p className="text-3xl font-bold text-slate-800 mt-1">{totalLogs}</p>
+              </div>
+            </div>
+
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col justify-between hover:shadow-md transition-shadow">
+              <div className="flex items-center gap-3 text-emerald-600 mb-2">
+                <CheckCircle size={24} />
+                <span className="text-sm font-medium text-emerald-900 bg-emerald-50 px-2 py-0.5 rounded-md">Today</span>
+              </div>
+              <div>
+                <h4 className="text-slate-400 text-sm font-medium">จำนวน Check-in</h4>
+                <p className="text-3xl font-bold text-slate-800 mt-1">{checkInLogs}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2">
+                <Activity className="text-indigo-500" size={20} />
+                สถิติการลงเวลา (แยกตามวัน)
+              </h3>
+            </div>
+
+            {logsError ? (
+              <p className="text-sm text-red-500">{logsError}</p>
+            ) : (
+              <div className="h-[250px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="colorCount" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="#4f46e5" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                    <XAxis
+                      dataKey="date"
+                      axisLine={false}
+                      tickLine={false}
+                      tick={{ fontSize: 12, fill: '#64748b' }}
+                      dy={10}
+                    />
+                    <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b' }} />
+                    <Tooltip
+                      contentStyle={{
+                        borderRadius: '12px',
+                        border: 'none',
+                        boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'
+                      }}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="count"
+                      stroke="#4f46e5"
+                      strokeWidth={3}
+                      fillOpacity={1}
+                      fill="url(#colorCount)"
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-              <div className="p-6 border-b border-slate-100 flex items-center justify-between">
-                <h3 className="font-bold text-lg text-slate-800">ล่าสุด 5 รายการ</h3>
-                {user?.type?.toLowerCase?.() === 'admin' ? (
-                  <a href="/home/checkins" className="text-sm text-indigo-600 font-medium hover:text-indigo-700">ดูทั้งหมด</a>
-                ) : (
-                  <span className="text-sm text-slate-400">เฉพาะผู้ดูแลระบบ</span>
-                )}
-              </div>
+        <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+          <h3 className="font-bold text-lg text-slate-800">ล่าสุด 5 รายการ</h3>
+          {user?.type?.toLowerCase?.() === 'admin' ? (
+            <a href="/home/checkins" className="text-sm text-indigo-600 font-medium hover:text-indigo-700">ดูทั้งหมด</a>
+          ) : (
+            <span className="text-sm text-slate-400">เฉพาะผู้ดูแลระบบ</span>
+          )}
+        </div>
 
-              <div className="overflow-x-auto">
-                <table className="w-full text-left">
-                  <thead className="bg-slate-50 text-slate-500 text-xs uppercase font-semibold">
-                    <tr>
-                      <th className="px-6 py-4">ชื่อ-นามสกุล</th>
-                      <th className="px-6 py-4">สถานะ</th>
-                      <th className="px-6 py-4">วันที่</th>
-                      <th className="px-6 py-4">เวลา</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {recentLogs.length === 0 ? (
-                      <tr>
-                        <td colSpan={4} className="px-6 py-6 text-center text-sm text-slate-400">
-                          ยังไม่มีข้อมูล
-                        </td>
-                      </tr>
-                    ) : (
-                      recentLogs.map((log, index) => (
-                        <tr key={`${log.timestamp}-${index}`} className="hover:bg-slate-50 transition-colors">
-                          <td className="px-6 py-4">
-                            <div className="flex items-center gap-3">
-                              <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-xs font-bold text-slate-500">
-                                {(log.name || user.name || 'U').charAt(0)}
-                              </div>
-                              <span className="font-medium text-slate-700">{log.name} {log.surname}</span>
-                            </div>
-                          </td>
-                          <td className="px-6 py-4">
-                            <span
-                              className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
+        <div className="overflow-x-auto">
+          <table className="w-full text-left">
+            <thead className="bg-slate-50 text-slate-500 text-xs uppercase font-semibold">
+              <tr>
+                <th className="px-6 py-4">ชื่อ-นามสกุล</th>
+                <th className="px-6 py-4">สถานะ</th>
+                <th className="px-6 py-4">วันที่</th>
+                <th className="px-6 py-4">เวลา</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {recentLogs.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="px-6 py-6 text-center text-sm text-slate-400">
+                    ยังไม่มีข้อมูล
+                  </td>
+                </tr>
+              ) : (
+                recentLogs.map((log, index) => (
+                  <tr key={`${log.timestamp}-${index}`} className="hover:bg-slate-50 transition-colors">
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-xs font-bold text-slate-500">
+                          {(log.name || user.name || 'U').charAt(0)}
+                        </div>
+                        <span className="font-medium text-slate-700">{log.name} {log.surname}</span>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span
+                        className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
                             ${log.status === 'CHECK_IN'
-                                  ? 'bg-green-100 text-green-800'
-                                  : 'bg-orange-100 text-orange-800'
-                                }
+                            ? 'bg-green-100 text-green-800'
+                            : 'bg-orange-100 text-orange-800'
+                          }
                           `}
-                            >
-                              {log.status === 'CHECK_IN' ? 'เข้าเรียน' : 'ออกเรียน'}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 text-sm text-slate-600">{formatThaiDate(log.timestamp)}</td>
-                          <td className="px-6 py-4 text-sm text-slate-600 font-mono">{formatTime(log.timestamp)}</td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                      >
+                        {log.status === 'CHECK_IN' ? 'เข้าเรียน' : 'ออกเรียน'}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-sm text-slate-600">{formatThaiDate(log.timestamp)}</td>
+                    <td className="px-6 py-4 text-sm text-slate-600 font-mono">{formatTime(log.timestamp)}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </HomeShell>
   );
