@@ -26,6 +26,8 @@ export default function UsersPage() {
   const [limit] = useState(10);
   const [totalPages, setTotalPages] = useState(1);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [resetPasswordModal, setResetPasswordModal] = useState<{ userId: string; userName: string } | null>(null);
+  const [newPassword, setNewPassword] = useState('');
 
   useEffect(() => {
     if (!currentUser) return;
@@ -140,6 +142,37 @@ export default function UsersPage() {
     }
   };
 
+  const resetPassword = async () => {
+    if (!resetPasswordModal) return;
+    if (!newPassword || newPassword.length < 6) {
+      setError('รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร');
+      return;
+    }
+
+    try {
+      setUpdatingId(resetPasswordModal.userId);
+      const response = await fetch('/api/admin/users', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: resetPasswordModal.userId, action: 'reset_password', newPassword })
+      });
+
+      const result = await response.json();
+      if (!result.success) {
+        setError(result.message || 'ไม่สามารถรีเซ็ตรหัสผ่านได้');
+        return;
+      }
+
+      alert('รีเซ็ตรหัสผ่านสำเร็จ');
+      setResetPasswordModal(null);
+      setNewPassword('');
+    } catch (err) {
+      setError('ไม่สามารถรีเซ็ตรหัสผ่านได้');
+    } finally {
+      setUpdatingId(null);
+    }
+  };
+
   if (!currentUser) return <div className="flex items-center justify-center min-h-screen text-gray-500">กำลังโหลด...</div>;
 
   return (
@@ -164,13 +197,14 @@ export default function UsersPage() {
                   <th className="px-6 py-4">เบอร์โทรศัพท์</th>
                   <th className="px-6 py-4">สิทธิ์</th>
                   <th className="px-6 py-4">ข้อมูลใบหน้า</th>
+                  <th className="px-6 py-4">รหัสผ่าน</th>
                   <th className="px-6 py-4">การจัดการ</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {users.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-6 py-6 text-center text-sm text-slate-400">
+                    <td colSpan={7} className="px-6 py-6 text-center text-sm text-slate-400">
                       ยังไม่มีข้อมูลผู้ใช้
                     </td>
                   </tr>
@@ -215,6 +249,15 @@ export default function UsersPage() {
                       </td>
                       <td className="px-6 py-4">
                         <button
+                          onClick={() => setResetPasswordModal({ userId: user._id, userName: `${user.prefix || ''}${user.name || ''} ${user.surname || ''}`.trim() })}
+                          disabled={updatingId === user._id}
+                          className="text-sm text-blue-600 hover:text-blue-700 disabled:text-blue-300"
+                        >
+                          รีเซ็ตรหัสผ่าน
+                        </button>
+                      </td>
+                      <td className="px-6 py-4">
+                        <button
                           onClick={() => deleteUser(user._id)}
                           disabled={updatingId === user._id}
                           className="text-sm text-red-600 hover:text-red-700 disabled:text-red-300"
@@ -249,6 +292,38 @@ export default function UsersPage() {
           </div>
         </div>
       </div>
+
+      {/* Reset Password Modal */}
+      {resetPasswordModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-md">
+            <h3 className="text-lg font-bold text-slate-800 mb-4">รีเซ็ตรหัสผ่าน</h3>
+            <p className="text-sm text-slate-600 mb-4">ผู้ใช้: <span className="font-medium">{resetPasswordModal.userName}</span></p>
+            <input
+              type="password"
+              placeholder="รหัสผ่านใหม่ (อย่างน้อย 6 ตัวอักษร)"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              className="w-full border border-slate-200 rounded-lg px-4 py-3 mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => { setResetPasswordModal(null); setNewPassword(''); }}
+                className="px-4 py-2 text-sm text-slate-600 hover:text-slate-800"
+              >
+                ยกเลิก
+              </button>
+              <button
+                onClick={resetPassword}
+                disabled={updatingId === resetPasswordModal.userId}
+                className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-300"
+              >
+                {updatingId === resetPasswordModal.userId ? 'กำลังบันทึก...' : 'ยืนยัน'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </HomeShell >
   );
 }

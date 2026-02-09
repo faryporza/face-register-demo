@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { ObjectId } from 'mongodb';
+import bcrypt from 'bcryptjs';
 import { getMongoClient } from '@/lib/mongodb';
 import { writeAuditLog } from '@/lib/auditLog';
 
@@ -75,7 +76,36 @@ export async function PATCH(req: Request) {
       return NextResponse.json({ success: false, message: 'Invalid JSON' }, { status: 400 });
     }
 
-    const { id, type, action } = body;
+    const { id, type, action, newPassword } = body;
+
+    // Logic for reset_password
+    if (action === 'reset_password') {
+      if (!id) return NextResponse.json({ success: false, message: 'Missing ID' }, { status: 400 });
+      if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 6) {
+        return NextResponse.json({ success: false, message: 'รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร' }, { status: 400 });
+      }
+
+      const client = await getMongoClient();
+      const db = client.db();
+      const facesCollection = db.collection('faces');
+
+      // Hash the new password
+      const hashedPassword = await bcrypt.hash(newPassword.trim(), 10);
+
+      await facesCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { password: hashedPassword } }
+      );
+
+      await writeAuditLog(req, {
+        event: 'admin-action',
+        status: 'success',
+        email: getRequesterEmail(req),
+        result: { action: 'reset_password' },
+        meta: { userId: id }
+      });
+      return NextResponse.json({ success: true, message: 'รีเซ็ตรหัสผ่านสำเร็จ' });
+    }
 
     // Logic for remove_face
     if (action === 'remove_face') {
